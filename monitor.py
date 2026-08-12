@@ -44,25 +44,6 @@ ENGLISH_DATE_RE = re.compile(
     re.IGNORECASE,
 )
 
-NORMAL_SECTION_PATTERN = re.compile(
-    r"^(?:"
-    r"일반(?:\s*업데이트)?|"
-    r"일반\s*모드|"
-    r"버그\s*수정|"
-    r"영웅(?:\s*밸런스)?(?:\s*업데이트)?|"
-    r"돌격|공격|지원|"
-    r"핵심\s*게임(?:\s*업데이트)?|"
-    r"경쟁전(?:\s*업데이트)?|"
-    r"전장(?:\s*업데이트)?|"
-    r"빠른\s*대전|자유\s*역할|역할\s*고정|"
-    r"6대6|아케이드|미스터리\s*영웅|"
-    r"시스템(?:\s*업데이트)?|UI(?:\s*업데이트)?|"
-    r"General(?:\s*Updates?)?|Bug\s*Fixes?|Hero(?:\s*Updates?)?|"
-    r"Tank|Damage|Support|Maps?|Competitive(?:\s*Play)?(?:\s*Updates?)?"
-    r")(?:\s*[:：-].*)?$",
-    re.IGNORECASE,
-)
-
 
 def clean_text(value: str) -> str:
     value = value.replace("\u200b", "")
@@ -113,10 +94,6 @@ def is_patch_title(text: str) -> bool:
     return has_patch_words and contains_patch_date(text)
 
 
-def is_stadium_patch_title(text: str) -> bool:
-    lowered = text.lower()
-    return "스타디움" in text or "stadium" in lowered
-
 
 def heading_level(tag_name: str) -> int | None:
     if re.fullmatch(r"h[1-6]", tag_name):
@@ -124,38 +101,6 @@ def heading_level(tag_name: str) -> int | None:
     return None
 
 
-def is_stadium_section_title(tag_name: str, text: str) -> bool:
-    if tag_name == "li" or len(text) > 70:
-        return False
-
-    lowered = text.lower()
-    if "스타디움" not in text and "stadium" not in lowered:
-        return False
-
-    if heading_level(tag_name) is not None:
-        return True
-
-    if tag_name != "p":
-        return False
-
-    compact = re.sub(r"\s+", "", text).lower()
-    return (
-        compact == "스타디움"
-        or compact == "stadium"
-        or compact.startswith("스타디움업데이트")
-        or compact.startswith("스타디움영웅")
-        or compact.startswith("스타디움버그")
-        or compact.startswith("스타디움밸런스")
-        or compact.startswith("stadiumupdates")
-        or compact.startswith("stadiumbug")
-        or compact.startswith("stadiumhero")
-    )
-
-
-def is_normal_paragraph_section_title(text: str) -> bool:
-    if len(text) > 60:
-        return False
-    return bool(NORMAL_SECTION_PATTERN.fullmatch(text.strip()))
 
 
 def find_title_node(soup: BeautifulSoup) -> Tag | None:
@@ -172,7 +117,7 @@ def find_title_node(soup: BeautifulSoup) -> Tag | None:
 
 def parse_latest_patch(
     html: str,
-) -> tuple[str, list[tuple[str, str]], str, bool]:
+) -> tuple[str, list[tuple[str, str]], str]:
     soup = BeautifulSoup(html, "html.parser")
     title_node = find_title_node(soup)
 
@@ -188,13 +133,8 @@ def parse_latest_patch(
 
     title = clean_text(title_node.get_text(" ", strip=True))
     title_level = heading_level(title_node.name) or 3
-    stadium_only_title = is_stadium_patch_title(title)
-
     items: list[tuple[str, str]] = []
     raw_parts = [title]
-    filtered_stadium = stadium_only_title
-    skipping_stadium = stadium_only_title
-    stadium_heading_level: int | None = None
 
     for node in title_node.find_all_next(
         ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li"]
@@ -203,11 +143,9 @@ def parse_latest_patch(
         if not text:
             continue
 
-        # 다음 날짜의 패치 제목이 시작되면 현재 패치 수집을 끝냅니다.
         if node is not title_node and is_patch_title(text):
             break
 
-        # 현재 제목보다 상위 단계의 페이지 영역으로 넘어가면 끝냅니다.
         current_level = heading_level(node.name)
         if (
             node is not title_node
@@ -224,49 +162,6 @@ def parse_latest_patch(
         }:
             continue
 
-        if stadium_only_title:
-            continue
-
-        if not skipping_stadium and is_stadium_section_title(node.name, text):
-            skipping_stadium = True
-            filtered_stadium = True
-            stadium_heading_level = current_level
-            continue
-
-        if skipping_stadium:
-            if stadium_heading_level is not None:
-                # 스타디움 큰 제목(h4 등) 아래의 영웅/기술 제목은 계속 제외합니다.
-                # 같은 단계 또는 상위 단계라도 일반 구역으로 인식되는 제목에서만 종료합니다.
-                if (
-                    current_level is not None
-                    and current_level <= stadium_heading_level
-                    and (
-                        is_normal_paragraph_section_title(text)
-                        or (
-                            "스타디움" not in text
-                            and "stadium" not in text.lower()
-                            and current_level < stadium_heading_level
-                        )
-                    )
-                ):
-                    skipping_stadium = False
-                    stadium_heading_level = None
-                else:
-                    continue
-            else:
-                # p 태그의 '스타디움'에서 시작한 경우 다음 일반 구역 표제까지 제외합니다.
-                if (
-                    (node.name == "p" and is_normal_paragraph_section_title(text))
-                    or (
-                        current_level is not None
-                        and is_normal_paragraph_section_title(text)
-                    )
-                ):
-                    skipping_stadium = False
-                else:
-                    continue
-
-        # 페이지 하단의 안내·포럼 링크 구역은 제외합니다.
         lowered = text.lower()
         if text in {"패치 노트", "Live Patch Notes"}:
             continue
@@ -281,26 +176,25 @@ def parse_latest_patch(
         raw_parts.append(text)
         items.append((node.name, text))
 
-    if not items and not filtered_stadium:
-        raise RuntimeError("최신 일반 모드 패치 본문을 찾지 못했습니다.")
+    if not items:
+        raise RuntimeError("최신 패치 본문을 찾지 못했습니다.")
 
-    digest_source = raw_parts if items else [title, "[STADIUM_ONLY_SKIPPED]"]
     digest = hashlib.sha256(
-        "\n".join(digest_source).encode("utf-8")
+        "\n".join(raw_parts).encode("utf-8")
     ).hexdigest()
-    return title, items, digest, filtered_stadium
+    return title, items, digest
 
 
 def fetch_latest_patch(
-) -> tuple[str, list[tuple[str, str]], str, bool, str]:
+) -> tuple[str, list[tuple[str, str]], str, str]:
     errors: list[str] = []
 
     for url in candidate_urls():
         try:
             html = fetch_html(url)
-            title, items, digest, filtered = parse_latest_patch(html)
+            title, items, digest = parse_latest_patch(html)
             print(f"패치 발견: {title} ({url})")
-            return title, items, digest, filtered, url
+            return title, items, digest, url
         except (requests.RequestException, RuntimeError) as exc:
             message = f"{url}: {exc}"
             errors.append(message)
@@ -319,7 +213,6 @@ def format_summary(
 ) -> list[str]:
     lines = [
         f"# {title}",
-        "※ 스타디움 관련 내용 제외",
         f"<{source_url}>",
         "",
     ]
@@ -390,7 +283,7 @@ def send_to_discord(webhook_url: str, messages: list[str]) -> None:
         response = requests.post(
             endpoint,
             json={
-                "username": "오버워치 일반 패치 알림",
+                "username": "오버워치 패치 알림",
                 "content": message,
                 "allowed_mentions": {"parse": []},
             },
@@ -417,7 +310,7 @@ def save_state(title: str, digest: str, source_url: str) -> None:
         "hash": digest,
         "source_url": source_url,
         "updated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "filter": "exclude_stadium_monthly_v2",
+        "parser": "monthly_all_patch_v1",
     }
     STATE_FILE.write_text(
         json.dumps(state, ensure_ascii=False, indent=2) + "\n",
@@ -431,17 +324,12 @@ def main() -> int:
         print("DISCORD_WEBHOOK_URL 환경 변수가 없습니다.", file=sys.stderr)
         return 2
 
-    title, items, digest, filtered_stadium, source_url = fetch_latest_patch()
+    title, items, digest, source_url = fetch_latest_patch()
     state = load_state()
     previous_hash = state.get("hash", "")
 
     if previous_hash == digest:
         print(f"변경 없음: {title}")
-        return 0
-
-    if not items and filtered_stadium:
-        save_state(title, digest, source_url)
-        print(f"스타디움 전용 패치 제외: {title}")
         return 0
 
     if not previous_hash and not SEND_ON_FIRST_RUN:
@@ -457,11 +345,10 @@ def main() -> int:
     change_type = (
         "최초 전송"
         if not previous_hash
-        else "새 일반 패치 또는 일반 본문 수정 감지"
+        else "새 패치 또는 본문 수정 감지"
     )
     print(f"{change_type}: {title} / {len(messages)}개 메시지 전송")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
