@@ -2,7 +2,7 @@
   "title": "오버워치 2 패치 노트 - 2026년 8월 21일",
   "hash": "9128f551e9a94340b9829fcfd9477a466db5057866fec6953ee5e82fa3db7180",
   "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
-  "updated_at_utc": "2026-09-08T02:58:18.883889+00:00",
+  "updated_at_utc": "2026-09-08T07:44:29.729306+00:00",
   "parser": "monthly_all_patch_v1",
   "version": 4,
   "patches": {
@@ -15,7 +15,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/06/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884035+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883841+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729259+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884035+00:00",
       "migration": "legacy_baseline"
     },
@@ -28,7 +28,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/06/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884055+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883859+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729276+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884055+00:00",
       "migration": "legacy_baseline"
     },
@@ -41,7 +41,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/06/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884059+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883863+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729280+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884059+00:00",
       "migration": "legacy_baseline"
     },
@@ -54,7 +54,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/06/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884062+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883866+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729283+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884062+00:00",
       "migration": "legacy_baseline"
     },
@@ -67,7 +67,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/06/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884064+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883868+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729285+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884064+00:00",
       "migration": "legacy_baseline"
     },
@@ -80,7 +80,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/07/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884067+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883870+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729287+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884067+00:00",
       "migration": "legacy_baseline"
     },
@@ -93,7 +93,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/07/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884069+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883873+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729289+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884069+00:00",
       "migration": "legacy_baseline"
     },
@@ -106,7 +106,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/07/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884071+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883875+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729291+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884071+00:00",
       "migration": "legacy_baseline"
     },
@@ -119,7 +119,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/07/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884073+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883877+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729293+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884073+00:00",
       "migration": "legacy_baseline"
     },
@@ -132,7 +132,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884075+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883879+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729296+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884075+00:00",
       "migration": "legacy_baseline"
     },
@@ -145,7 +145,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884077+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883881+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729298+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884077+00:00",
       "migration": "legacy_baseline"
     },
@@ -158,7 +158,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884079+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883883+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729300+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884079+00:00",
       "migration": "legacy_baseline"
     },
@@ -171,7 +171,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884082+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883885+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729303+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884082+00:00",
       "migration": "legacy_baseline"
     },
@@ -184,7 +184,7 @@
       "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884084+00:00",
-      "last_seen_utc": "2026-09-08T02:58:18.883887+00:00",
+      "last_seen_utc": "2026-09-08T07:44:29.729304+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884084+00:00",
       "migration": "legacy_baseline"
     }
