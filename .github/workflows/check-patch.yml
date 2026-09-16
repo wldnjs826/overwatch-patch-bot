@@ -1,4 +1,3 @@
-
 name: Overwatch patch monitor
 
 on:
@@ -19,28 +18,36 @@ jobs:
 
     steps:
       - name: 저장소 가져오기
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Python 설치
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
 
-      - name: 라이브러리 설치
+      - name: 한글 폰트 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+
+      - name: Python 라이브러리 설치
         run: pip install -r requirements.txt
 
-      - name: 패치 확인 및 디스코드 전송
+      - name: 패치 확인 및 Discord 전송
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           SEND_ON_FIRST_RUN: "true"
-          MAX_MESSAGES: "8"
+          MONTH_LOOKBACK: "4"
+          NEXON_MAX_ARTICLES: "20"
+          MAX_TEXT_MESSAGES: "20"
         run: python monitor.py
 
-      - name: 감지 상태 저장
+      - name: state.json 저장
+        if: success()
         run: |
           if git diff --quiet -- state.json; then
-            echo "저장할 변경 사항이 없습니다."
+            echo "state.json 변경 없음"
             exit 0
           fi
 
