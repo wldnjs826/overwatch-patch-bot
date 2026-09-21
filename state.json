@@ -2,7 +2,7 @@
   "title": "오버워치 2 패치 노트 - 2026년 8월 21일",
   "hash": "9128f551e9a94340b9829fcfd9477a466db5057866fec6953ee5e82fa3db7180",
   "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
-  "updated_at_utc": "2026-09-21T15:10:33.991991+00:00",
+  "updated_at_utc": "2026-09-21T20:01:48.346997+00:00",
   "parser": "monthly_all_patch_v1",
   "version": 8,
   "patches": {
@@ -115,7 +115,7 @@
       "source_url": "https://overwatch.nexon.com/news/patchnotes/687/patch-2026-07-01",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884067+00:00",
-      "last_seen_utc": "2026-09-21T15:10:18.629076+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.340841+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884067+00:00",
       "discord_message_ids": [
         "1551505900382982250"
@@ -144,7 +144,7 @@
       "source_url": "https://overwatch.nexon.com/news/patchnotes/689/patch-2026-07-14",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884069+00:00",
-      "last_seen_utc": "2026-09-21T15:10:18.631357+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.342072+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884069+00:00",
       "discord_message_ids": [
         "1551505914375438409",
@@ -187,7 +187,7 @@
       "source_url": "https://overwatch.nexon.com/news/patchnotes/694/patch-2026-07-28",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884071+00:00",
-      "last_seen_utc": "2026-09-21T15:10:18.631515+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.342157+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884071+00:00",
       "discord_message_ids": [
         "1551506060488085555",
@@ -217,7 +217,7 @@
       "source_url": "https://overwatch.nexon.com/news/patchnotes/695/patch-2026-07-30",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884073+00:00",
-      "last_seen_utc": "2026-09-21T15:10:18.631896+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.342356+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884073+00:00",
       "discord_message_ids": [
         "1551506080402636832",
@@ -248,7 +248,7 @@
       "source_url": "https://overwatch.nexon.com/news/patchnotes/709/patch-2026-08-11",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884075+00:00",
-      "last_seen_utc": "2026-09-21T15:10:18.636764+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.344983+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884075+00:00",
       "discord_message_ids": [
         "1551506110324678778",
@@ -300,7 +300,7 @@
       "source_url": "https://overwatch.nexon.com/news/patchnotes/803/patch-2026-08-12",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884077+00:00",
-      "last_seen_utc": "2026-09-21T15:10:18.636955+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.345084+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884077+00:00",
       "discord_message_ids": [
         "1551506318152568934",
@@ -330,7 +330,7 @@
       "source_url": "https://overwatch.nexon.com/news/patchnotes/805/patch-2026-08-14",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884079+00:00",
-      "last_seen_utc": "2026-09-21T15:10:18.637232+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.345236+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884079+00:00",
       "discord_message_ids": [
         "1551506338146680853",
@@ -360,7 +360,7 @@
       "source_url": "https://overwatch.nexon.com/news/patchnotes/807/patch-2026-08-19",
       "status": "sent",
       "first_seen_utc": "2026-09-02T09:33:35.884082+00:00",
-      "last_seen_utc": "2026-09-21T15:10:18.637478+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.345388+00:00",
       "sent_at_utc": "2026-09-02T09:33:35.884082+00:00",
       "discord_message_ids": [
         "1551506358434664469"
@@ -422,7 +422,7 @@
       ],
       "summary_card_version": 2,
       "first_seen_utc": "2026-09-21T08:12:24.421965+00:00",
-      "last_seen_utc": "2026-09-21T15:10:18.637572+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.345435+00:00",
       "sent_at_utc": "2026-09-21T08:12:27.459533+00:00",
       "last_edited_at_utc": "2026-09-21T08:12:27.459536+00:00",
       "sent_source": "nexon",
@@ -440,7 +440,7 @@
       "source_url": "https://overwatch.nexon.com/news/patchnotes/820/patch-2026-09-08",
       "status": "sent",
       "first_seen_utc": "2026-09-08T19:36:07.479087+00:00",
-      "last_seen_utc": "2026-09-21T15:10:18.639975+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.346853+00:00",
       "sent_at_utc": "2026-09-08T19:36:07.479087+00:00",
       "language_reason": "한국어 본문으로 판별",
       "discord_message_ids": [
@@ -497,7 +497,7 @@
       "source_url": "https://overwatch.nexon.com/news/patchnotes/823/patch-2026-09-10",
       "status": "sent",
       "first_seen_utc": "2026-09-15T01:37:31.835986+00:00",
-      "last_seen_utc": "2026-09-21T15:10:27.637529+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.346910+00:00",
       "sent_at_utc": "2026-09-15T01:37:31.835986+00:00",
       "language_reason": "한국어 본문으로 판별",
       "discord_message_ids": [
@@ -559,7 +559,7 @@
       ],
       "summary_card_version": 2,
       "first_seen_utc": "2026-09-21T08:13:21.297471+00:00",
-      "last_seen_utc": "2026-09-21T15:10:32.181166+00:00",
+      "last_seen_utc": "2026-09-21T20:01:48.346995+00:00",
       "sent_at_utc": "2026-09-21T08:13:24.246267+00:00",
       "last_edited_at_utc": "2026-09-21T08:13:24.246271+00:00",
       "sent_source": "nexon",
