@@ -3260,8 +3260,16 @@ def preview_patches(patches: list[Patch], state: dict) -> None:
 # ============================================================
 
 
+def select_delivery_patches(patches: list[Patch], latest_only: bool) -> list[Patch]:
+    """Limit delivery after source deduplication and stable ID assignment."""
+    if latest_only and patches:
+        return [max(patches, key=lambda patch: (patch.date_key, patch.same_day_index))]
+    return patches
+
+
 def main() -> int:
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"
+    latest_only = os.getenv("LATEST_PATCH_ONLY", "false").strip().lower() == "true"
     webhook_url = os.getenv(
         "DISCORD_WEBHOOK_URL",
         "",
@@ -3289,9 +3297,15 @@ def main() -> int:
 
         return 1
 
+    delivery_patches = select_delivery_patches(patches, latest_only)
+    if latest_only:
+        print(f"\n최신 패치 1개만 처리: {len(delivery_patches)}개 선택 / 과거 패치 {len(patches) - len(delivery_patches)}개 제외")
+        for selected in delivery_patches:
+            print(f"선택된 패치: {selected.patch_id} / {selected.title}")
+
     state = load_state()
     if dry_run:
-        preview_patches(patches, state)
+        preview_patches(delivery_patches, state)
         return 0
 
     migrated = migrate_legacy_state(
@@ -3321,7 +3335,7 @@ def main() -> int:
     duplicate_count = 0
 
     try:
-        for patch in patches:
+        for patch in delivery_patches:
             result = process_patch(
                 patch,
                 state,
