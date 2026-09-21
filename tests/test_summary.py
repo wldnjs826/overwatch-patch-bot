@@ -86,6 +86,8 @@ class SummaryTests(unittest.TestCase):
             ("폭발 지연이 1초에서 0.8초로 감소했습니다.", "buff"),
             ("강화된 펀치의 방사형 피해 사거리 증가가 75%에서 40%로 감소했습니다.", "nerf"),
             ("최대 분산도의 범위가 1에서 1.5로 증가했습니다.", "nerf"),
+            ("최대 분산도에 도달하기까지의 탄환 수가 0발에서 30발로 증가했습니다.", "buff"),
+            ("하나의 기관포만을 발사할 때의 최대 분산도가 1.5에서 1로 복원되었습니다.", "buff"),
             ("재사용 대기시간 감소량이 20%에서 10%로 감소했습니다.", "nerf"),
             ("궁극기 충전 비용 감소가 50%에서 60%로 증가했습니다.", "buff"),
             ("대상당 재사용 대기시간 감소가 2초에서 2.5초로 증가했습니다.", "buff"),
@@ -112,7 +114,7 @@ class SummaryTests(unittest.TestCase):
         raw = monitor.parse_nexon_article((Path(__file__).parent / "fixtures/nexon-july15.html").read_text(encoding="utf-8"), "https://overwatch.nexon.com/news/patchnotes/689/patch-2026-07-14")
         parsed = monitor.assign_patch_ids([raw])[0]
         result = {(r["mode"], r["hero"]): r for r in monitor.extract_balance_summary(parsed)}
-        for hero, category in {"둠피스트": "nerf", "정커퀸": "buff", "라마트라": "buff", "시그마": "nerf", "캐서디": "nerf", "프레야": "buff", "리퍼": "buff", "벤처": "buff", "아나": "buff", "루시우": "buff", "키리코": "nerf", "시온": "adjust"}.items():
+        for hero, category in {"둠피스트": "nerf", "정커퀸": "buff", "라마트라": "buff", "시그마": "nerf", "캐서디": "nerf", "프레야": "buff", "리퍼": "buff", "벤처": "buff", "아나": "buff", "루시우": "buff", "키리코": "nerf", "시온": "adjust", "마우가": "adjust"}.items():
             with self.subTest(hero=hero):
                 self.assertEqual(result[("일반전", hero)]["category"], category)
         self.assertEqual(monitor.classify_change_line(result[("스타디움", "정커퀸")]["changes"][0]), "nerf")
@@ -133,11 +135,13 @@ class SummaryTests(unittest.TestCase):
         core = {e["hero"]: e for e in entries if e["mode"] == "일반전"}
         expected = {"D.Va": "buff", "도미나": "buff", "안란": "buff", "바티스트": "buff",
                     "레킹볼": "nerf", "자리야": "nerf", "프레야": "nerf", "시메트라": "nerf", "키리코": "nerf", "젠야타": "nerf",
-                    "정크랫": "adjust", "시에라": "adjust", "토르비욘": "adjust", "벤데타": "adjust", "브리기테": "adjust"}
+                    "정크랫": "adjust", "시에라": "adjust", "토르비욘": "adjust", "벤데타": "adjust", "브리기테": "adjust", "마우가": "adjust", "제트팩 캣": "adjust"}
         for hero, category in expected.items():
             with self.subTest(hero=hero):
                 self.assertEqual(core[hero]["category"], category)
         self.assertEqual({line["category"] for line in core["정크랫"]["changes"]}, {"buff", "nerf"})
+        self.assertTrue(any("복원" in line or "1.5 → 1" in line for line in (c["text"] for c in core["마우가"]["changes"])))
+        self.assertTrue(any("사망 구역" in c["text"] for c in core["제트팩 캣"]["changes"]))
 
 
 if __name__ == "__main__":

@@ -163,8 +163,8 @@ HIGHER_IS_BETTER_KEYWORDS = (
 )
 
 CHANGE_NUMBER_RE = re.compile(
-    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*(%p|%|밀리초|초|m/s|m|미터/초|미터|)?\s*(?:→|->|에서)\s*"
-    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*(%p|%|밀리초|초|m/s|m|미터/초|미터)?",
+    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*(%p|%|밀리초|초|m/s|m|미터/초|미터|발|개|회|배)?\s*(?:→|->|에서)\s*"
+    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*(%p|%|밀리초|초|m/s|m|미터/초|미터|발|개|회|배)?",
     re.IGNORECASE,
 )
 
@@ -1863,8 +1863,11 @@ def classify_change_line(text: str) -> str:
     # Presentation-only changes have no numeric combat benefit. Keep their row
     # visible, without overriding a hero's otherwise clear buff/nerf category.
     if re.search(r"시각 효과|음향|효과음|카메라|1인칭.*애니메이션", normalized):
-        if not re.search(r"공격력|피해량|치유량|재사용 대기|생명력", normalized):
+        if not re.search(r"공격력|피해|치유|재사용 대기|생명력|비용|탄약|재생률", normalized):
             return "neutral"
+
+    if re.search(r"최대 분산도에 도달하기까지의 탄환 수", metric):
+        return "buff" if direction > 0 else "nerf" if direction < 0 else "adjust"
 
     # A longer attack animation is a cost; a longer shield/drone/invulnerability
     # effect is a benefit. Unknown duration contexts remain 'adjust'.
@@ -1984,7 +1987,10 @@ def extract_balance_summary(
         if current_hero and tag_name in {"p", "li"} and len(text) <= 70 and re.search(r"[-–].*(?:특전|파워|아이템)$", text):
             current_ability = text
             continue
-        if current_hero and _looks_like_change_line(text):
+        # Structured hero list items are changes even without words like
+        # increase/decrease (restorations, conditional effects, new mechanics).
+        if current_hero and (_looks_like_change_line(text) or (
+                tag_name == "li" and text not in {"기술 조정", "변경 사항"})):
             line = f"{current_ability}: {text}" if current_ability else text
             lines = heroes.setdefault((current_mode, current_role or "영웅", current_hero), [])
             if line not in lines:
