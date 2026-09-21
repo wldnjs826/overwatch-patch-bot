@@ -1,0 +1,42 @@
+name: Test latest patch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: overwatch-patch-monitor
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 저장소 가져오기
+        uses: actions/checkout@v5
+
+      - name: Python 설치
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 한글 폰트 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+
+      - name: Python 라이브러리 설치
+        run: pip install -r requirements.txt
+
+      - name: 최신 한국어 패치 테스트 전송
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          MONTH_LOOKBACK: "4"
+          NEXON_MAX_ARTICLES: "20"
+          MAX_TEXT_MESSAGES: "20"
+        run: python test_latest.py
