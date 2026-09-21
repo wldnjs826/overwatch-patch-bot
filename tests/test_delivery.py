@@ -36,6 +36,7 @@ class DeliveryTests(unittest.TestCase):
         self.card = self.directory / "summary.png"
         self.card.write_bytes(b"test image: transport is mocked")
         self.generate = self.stack.enter_context(patch.object(monitor, "generate_summary_cards", return_value=[self.card]))
+        self.real_build_payloads = monitor.build_discord_payloads
         self.payloads = self.stack.enter_context(patch.object(monitor, "build_discord_payloads", return_value=[{"content": "patch body", "embeds": []}]))
         items = [("h2", "영웅 업데이트"), ("li", "방어력이 325에서 275로 감소했습니다.")]
         self.patch = monitor.assign_patch_ids([{
@@ -178,6 +179,67 @@ class DeliveryTests(unittest.TestCase):
                 monitor.save_state(self.state)
         self.assertEqual(monitor.STATE_FILE.read_bytes(), before)
         self.assertFalse(monitor.STATE_FILE.with_suffix(".json.tmp").exists())
+
+    def test_source_images_are_omitted_but_summary_card_is_sent(self):
+        self.payloads.side_effect = self.real_build_payloads
+        self.patch.images = ["https://example.com/hero.png", "https://example.com/ability.png"]
+        self.patch.image_hash = monitor.build_image_hash(self.patch.images)
+        self.post.side_effect = [response("text-1"), response("card-1")]
+        self.assertEqual(self.process(), "sent")
+        self.assertEqual(self.post.call_count, 2)
+        text_request, card_request = self.post.call_args_list
+        self.assertEqual(text_request.kwargs["json"]["embeds"], [])
+        self.assertIn(self.patch.title, text_request.kwargs["json"]["content"])
+        self.assertIn(self.patch.source_url, text_request.kwargs["json"]["content"])
+        self.assertIn(self.patch.items[-1][1], text_request.kwargs["json"]["content"])
+        for image_url in self.patch.images:
+            self.assertNotIn(image_url, str(self.post.call_args_list))
+        self.assertIn("files[0]", card_request.kwargs["files"])
+        self.assertEqual(self.reload()["summary_message_ids"], ["card-1"])
+
+    def test_source_image_change_does_not_resend_or_refresh_cards(self):
+        record = self.legacy_record()
+        record.update({
+            "discord_message_ids": ["text-1", "old-source-images"],
+            "summary_message_ids": ["card-1"],
+            "summary_card_version": monitor.SUMMARY_CARD_VERSION,
+            "summary_body_hash": self.patch.body_hash,
+            "summary_image_hash": self.patch.image_hash,
+        })
+        self.patch.images = ["https://example.com/replaced-image.png"]
+        self.patch.image_hash = monitor.build_image_hash(self.patch.images)
+        self.assertEqual(self.process(), "already_sent")
+        self.post.assert_not_called()
+        self.edit.assert_not_called()
+        self.delete.assert_not_called()
+        self.generate.assert_not_called()
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            monitor.preview_patches([self.patch], self.state)
+        self.assertIn("변경 없음", output.getvalue())
+        self.assertNotIn("대상", output.getvalue())
+
+    def test_text_update_preserves_cards_and_removes_old_image_batch(self):
+        self.payloads.side_effect = self.real_build_payloads
+        record = self.legacy_record()
+        record.update({
+            "body_hash": "previous body",
+            "discord_message_ids": ["text-1", "old-source-images"],
+            "summary_message_ids": ["card-1"],
+            "summary_card_version": monitor.SUMMARY_CARD_VERSION,
+            "summary_body_hash": "previous body",
+        })
+        self.patch.images = ["https://example.com/updated-image.png"]
+        self.patch.image_hash = monitor.build_image_hash(self.patch.images)
+        self.assertEqual(self.process(), "updated")
+        self.post.assert_not_called()
+        self.assertEqual(self.edit.call_count, 2)
+        self.assertIn("/messages/text-1", self.edit.call_args_list[0].args[0])
+        self.assertIn("files", self.edit.call_args_list[1].kwargs)
+        self.delete.assert_called_once()
+        self.assertIn("/messages/old-source-images", self.delete.call_args.args[0])
+        self.assertEqual(record["discord_message_ids"], ["text-1"])
+        self.assertEqual(record["summary_message_ids"], ["card-1"])
+        self.assertEqual(self.process(), "already_sent")
 
 
 if __name__ == "__main__":
