@@ -62,6 +62,15 @@ class CardLayoutTests(unittest.TestCase):
                 self.assertLessEqual(image.height, cards.MAX_HEIGHT)
                 self.assertEqual(image.format, "PNG")
 
+    def test_stadium_mode_is_visible_and_not_merged_with_core_hero(self):
+        core = entry([self.change("재사용 대기시간 12초 → 10초")], hero="정커퀸", role="돌격", category="buff")
+        stadium = {**core, "mode": "스타디움"}
+        pages = cards.plan_cards([core, stadium], [], monitor._find_font_path)
+        rows = [row for page in pages for row in page["rows"]]
+        self.assertEqual(len(rows), 2)
+        self.assertNotIn("스타디움", "".join(line["text"] for line in rows[0]["badge"]))
+        self.assertIn("스타디움", "".join(line["text"] for line in rows[1]["badge"]))
+
 
 if __name__ == "__main__":
     unittest.main()

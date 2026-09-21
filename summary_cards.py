@@ -11,9 +11,9 @@ ROLE_WIDTH, HERO_WIDTH = 100, 164
 TEXT_X = MARGIN + ROLE_WIDTH + HERO_WIDTH + 45
 TEXT_WIDTH = WIDTH - MARGIN - TEXT_X - 24
 LINE_HEIGHT, PAD = 38, 18
-COLORS = {"buff": "#55C9AD", "nerf": "#F06A91", "adjust": "#F79442", "general": "#5DB6D2"}
+COLORS = {"buff": "#55C9AD", "nerf": "#F06A91", "adjust": "#F79442", "general": "#5DB6D2", "neutral": "#B7C6CD"}
 LABELS = {"buff": "상향", "nerf": "하향", "adjust": "조정", "general": "핵심 요약"}
-ARROWS = {"buff": "↑", "nerf": "↓", "adjust": "↔", "general": "•"}
+ARROWS = {"buff": "↑", "nerf": "↓", "adjust": "↔", "general": "•", "neutral": "•"}
 ROLE_ORDER = {"돌격": 0, "공격": 1, "지원": 2, "영웅": 3, "일반": 4}
 
 
@@ -96,6 +96,8 @@ def plan_cards(entries, general_changes, font_path):
                 gap = 14 if separated else 0
                 label = entry["hero"] + (" · 계속" if offset else "")
                 badge = wrap_styled(label, [], fonts["hero"], HERO_WIDTH - 18)
+                if entry.get("mode") == "스타디움":
+                    badge.extend(wrap_styled("스타디움", [], fonts["hero"], HERO_WIDTH - 18))
                 minimum = max(116, len(badge) * 30 + 2 * PAD)
                 available = MAX_HEIGHT - FOOTER - cursor - gap
                 if available < minimum:
@@ -104,6 +106,7 @@ def plan_cards(entries, general_changes, font_path):
                 take = min(len(lines) - offset, int((available - 2 * PAD) // LINE_HEIGHT))
                 height = max(minimum, take * LINE_HEIGHT + 2 * PAD)
                 row = {"role": entry["role"], "hero": entry["hero"], "badge": badge,
+                       "mode": entry.get("mode", "일반전"),
                        "continued": offset > 0, "top": cursor + gap, "height": height,
                        "lines": lines[offset:offset + take]}
                 page["rows"].append(row)
