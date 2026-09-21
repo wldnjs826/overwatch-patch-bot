@@ -3,7 +3,7 @@ name: Overwatch patch monitor
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "7,22,37,52 * * * *"
 
 permissions:
   contents: write
@@ -35,6 +35,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: 패치 확인 및 Discord 전송
+        id: monitor
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           SEND_ON_FIRST_RUN: "true"
@@ -44,15 +45,21 @@ jobs:
         run: python monitor.py
 
       - name: state.json 저장
-        if: success()
+        if: ${{ always() && (steps.monitor.outcome == 'success' || steps.monitor.outcome == 'failure') }}
         run: |
-          if git diff --quiet -- state.json; then
+          if [ ! -f state.json ]; then
+            echo "저장할 state.json 없음"
+            exit 0
+          fi
+
+          git add -- state.json
+          if git diff --cached --quiet -- state.json; then
             echo "state.json 변경 없음"
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state.json
           git commit -m "Update Overwatch patch state"
-          git push
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

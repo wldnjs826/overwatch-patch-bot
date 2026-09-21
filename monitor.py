@@ -8,11 +8,12 @@ import sys
 import time
 import tempfile
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -108,6 +109,8 @@ GENERIC_SECTION_WORDS = {
 LOWER_IS_BETTER_KEYWORDS = (
     "재사용 대기",
     "쿨다운",
+    "소모",
+    "궁극기 비용",
     "cooldown",
     "시전 시간",
     "시전시간",
@@ -782,6 +785,45 @@ def describe_language(
 # 넥슨 1순위 소스
 # ============================================================
 
+def nexon_payload_articles(soup: BeautifulSoup) -> list[dict]:
+    """Read identifiers from Nuxt's indexed JSON table without executing JS.
+
+    The list's summary is truncated; patch text must come from the detail page.
+    """
+    script = soup.find("script", id="__NUXT_DATA__")
+    if script is None:
+        return []
+    try:
+        table = json.loads(script.get_text())
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(table, list):
+        return []
+
+    def scalar(reference: object) -> object:
+        if type(reference) is int and 0 <= reference < len(table):
+            value = table[reference]
+            if value is None or isinstance(value, (str, int, float, bool)):
+                return value
+        return None
+
+    articles = []
+    for entry in table:
+        if not isinstance(entry, dict) or "newsNo" not in entry:
+            continue
+        article = {
+            key: scalar(entry.get(key))
+            for key in ("newsNo", "categoryId", "slug")
+        }
+        if (
+            article["categoryId"] == 2
+            and type(article["newsNo"]) is int
+            and article["newsNo"] > 0
+        ):
+            articles.append(article)
+    return articles
+
+
 def extract_nexon_article_links(
     list_html: str,
 ) -> list[str]:
@@ -792,6 +834,18 @@ def extract_nexon_article_links(
 
     links: list[str] = []
     seen: set[str] = set()
+
+    def add_link(href: str) -> None:
+        parts = urlsplit(urljoin(NEXON_LIST_URL, href))
+        if parts.netloc != urlsplit(NEXON_LIST_URL).netloc:
+            return
+        if not NEXON_ARTICLE_HREF_RE.search(parts.path):
+            return
+        # Numeric and slug routes can both point to the same article.
+        article_id = parts.path.split("/")[3]
+        if article_id not in seen and len(links) < NEXON_MAX_ARTICLES:
+            seen.add(article_id)
+            links.append(urlunsplit((parts.scheme, parts.netloc, parts.path, "", "")))
 
     for anchor in soup.find_all(
         "a",
@@ -804,32 +858,15 @@ def extract_nexon_article_links(
             )
         ).strip()
 
-        if not NEXON_ARTICLE_HREF_RE.search(
-            href
-        ):
-            continue
+        add_link(href)
 
-        url = urljoin(
-            NEXON_LIST_URL,
-            href,
-        )
-
-        if url in seen:
-            continue
-
-        seen.add(
-            url
-        )
-
-        links.append(
-            url
-        )
-
-        if (
-            len(links)
-            >= NEXON_MAX_ARTICLES
-        ):
-            break
+    # Current list cards are clickable divs. Their routes live in the hydration
+    # table alongside unrelated news and events, which categoryId filters out.
+    for article in nexon_payload_articles(soup):
+        href = f"/news/patchnotes/{article['newsNo']}"
+        if isinstance(article["slug"], str) and article["slug"]:
+            href += "/" + quote(article["slug"], safe="")
+        add_link(href)
 
     return links
 
@@ -959,15 +996,15 @@ def parse_nexon_article(
         "html.parser",
     )
 
+    detail = soup.select_one(".news-detail")
     area = (
-        soup.find("article")
+        detail
+        or soup.find("article")
         or soup.find("main")
         or soup
     )
 
-    title_node = find_patch_title_node(
-        area
-    )
+    title_node = area.select_one(".news-head .title") or find_patch_title_node(area)
 
     if title_node is None:
         return None
@@ -983,7 +1020,7 @@ def parse_nexon_article(
         title
     )
 
-    if not date_key:
+    if not date_key or not is_patch_title(title):
         return None
 
     items: list[
@@ -993,19 +1030,19 @@ def parse_nexon_article(
     images: list[str] = []
     raw_seen: list[str] = []
 
-    for node in title_node.find_all_next(
-        [
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-            "p",
-            "li",
-            "img",
-        ]
-    ):
+    node_names = [
+        "h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "img", "div",
+    ]
+    body = area.select_one(".news-body")
+    if detail is not None and body is None:
+        return None
+    nodes = (
+        body.find_all(node_names)
+        if body is not None
+        else title_node.find_all_next(node_names)
+    )
+
+    for node in nodes:
         if node is title_node:
             continue
 
@@ -1014,6 +1051,16 @@ def parse_nexon_article(
             area,
         ):
             break
+
+        tag_name = node.name
+        if tag_name == "div":
+            if "PatchNotesAbilityUpdate-name" not in node.get("class", []):
+                continue
+            tag_name = "h6"
+
+        # A paragraph nested in an li is already represented by that list item.
+        if tag_name == "p" and node.find_parent("li") is not None:
+            continue
 
         if node.name == "img":
             image_url = extract_image_url(
@@ -1028,8 +1075,15 @@ def parse_nexon_article(
 
             continue
 
+        text_node = node
+        if node.name == "li" and node.find(["ul", "ol"]) is not None:
+            # Keep the parent's label; child list items are visited separately.
+            text_node = BeautifulSoup(str(node), "html.parser")
+            for nested_list in text_node.find_all(["ul", "ol"]):
+                nested_list.decompose()
+
         text = clean_text(
-            node.get_text(
+            text_node.get_text(
                 " ",
                 strip=True,
             )
@@ -1074,7 +1128,7 @@ def parse_nexon_article(
 
         items.append(
             (
-                node.name,
+                tag_name,
                 text,
             )
         )
@@ -1806,84 +1860,52 @@ def extract_balance_summary(
     """
     current_role: str | None = None
     current_hero: str | None = None
-
-    heroes: dict[
-        tuple[str, str],
-        list[str],
-    ] = {}
+    current_ability: str | None = None
+    hero_level: int | None = None
+    in_hero_section = False
+    heroes: dict[tuple[str, str], list[str]] = {}
 
     for tag_name, raw_text in patch.items:
-        text = clean_text(
-            raw_text
-        )
-
+        text = clean_text(raw_text)
         if not text:
             continue
-
-        is_heading = tag_name in {
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-        }
-
-        if is_heading:
-            role = _role_from_heading(
-                text
-            )
-
+        level = heading_level(tag_name)
+        if level is not None:
+            role = _role_from_heading(text)
             if role:
                 current_role = role
-                current_hero = None
+                current_hero = current_ability = None
+                hero_level = None
+                in_hero_section = True
                 continue
-
-            if _is_generic_section(
-                text
-            ):
-                # 역할 자체는 유지하되 영웅은 종료
-                current_hero = None
+            if _is_generic_section(text):
+                current_role = current_hero = current_ability = None
+                hero_level = None
+                in_hero_section = ("영웅" in text or "hero" in text.lower())
                 continue
-
-            # 역할 아래의 짧은 제목은 영웅명으로 취급
-            if (
-                current_role
-                and 1 <= len(text) <= 36
+            if current_hero and hero_level is not None and level > hero_level:
+                current_ability = text
+                continue
+            # Nexon hotfixes can omit role headings but retain h5 hero names.
+            if in_hero_section and 1 <= len(text) <= 36 and (
+                current_role is not None or level == 5
             ):
                 current_hero = text
-
-                heroes.setdefault(
-                    (
-                        current_role,
-                        current_hero,
-                    ),
-                    [],
-                )
-
+                current_ability = None
+                hero_level = level
+                heroes.setdefault((current_role or "영웅", current_hero), [])
+            else:
+                current_hero = current_ability = None
+                hero_level = None
             continue
-
-        if (
-            current_role
-            and current_hero
-            and _looks_like_change_line(text)
-        ):
-            key = (
-                current_role,
-                current_hero,
-            )
-
-            lines = heroes.setdefault(
-                key,
-                [],
-            )
-
-            if (
-                text not in lines
-            ):
-                lines.append(
-                    text
-                )
+        if current_hero and tag_name == "p" and "특전" in text and len(text) <= 50 and not _looks_like_change_line(text):
+            current_ability = text
+            continue
+        if current_hero and _looks_like_change_line(text):
+            line = f"{current_ability}: {text}" if current_ability else text
+            lines = heroes.setdefault((current_role or "영웅", current_hero), [])
+            if line not in lines:
+                lines.append(line)
 
     result: list[dict] = []
 
@@ -2005,6 +2027,10 @@ def _find_font_path(
         ]
     )
 
+    windows_fonts = Path(os.getenv("WINDIR", "C:/Windows")) / "Fonts"
+    candidates.append(str(windows_fonts / ("malgunbd.ttf" if bold else "malgun.ttf")))
+    candidates.append("/System/Library/Fonts/AppleSDGothicNeo.ttc")
+
     for candidate in candidates:
         if Path(
             candidate
@@ -2013,8 +2039,8 @@ def _find_font_path(
 
     # 마지막 fallback. 한글 폰트가 아니면 카드 생성은 중단합니다.
     raise RuntimeError(
-        "Noto Sans CJK 폰트를 찾지 못했습니다. "
-        "GitHub Actions에서 fonts-noto-cjk 설치 단계가 필요합니다."
+        "한글 폰트를 찾지 못했습니다. "
+        "Linux에서는 fonts-noto-cjk, Windows에서는 맑은 고딕이 필요합니다."
     )
 
 
@@ -2992,102 +3018,54 @@ def generate_summary_cards(
 def send_summary_cards(
     webhook_url: str,
     patch: Patch,
+    old_message_ids: list[str] | None = None,
+    on_progress: Callable[[list[str]], None] | None = None,
 ) -> list[str]:
-    """
-    원본 패치 메시지 전송이 끝난 뒤 호출됩니다.
-    카드 한 장을 Discord 메시지 하나로 보내므로
-    모바일에서도 작게 뭉개지지 않고 크게 보입니다.
-    """
-    with tempfile.TemporaryDirectory(
-        prefix="ow-summary-"
-    ) as temp_dir:
-        paths = generate_summary_cards(
-            patch,
-            Path(
-                temp_dir
-            ),
-        )
-
-        if not paths:
-            print(
-                "요약 카드로 만들 항목 없음"
-            )
-
-            return []
-
-        endpoint = (
-            webhook_base_url(
-                webhook_url
-            )
-            + "?wait=true"
-        )
-
-        message_ids: list[str] = []
-
-        total = len(
-            paths
-        )
-
-        for index, path in enumerate(
-            paths,
-            start=1,
-        ):
-            payload_json = json.dumps(
-                {
-                    "username": "오버워치 패치 요약",
-                    "content": (
-                        f"**자동 요약 카드 "
-                        f"[{index}/{total}]**"
-                    ),
-                    "allowed_mentions": {
-                        "parse": []
-                    },
-                },
-                ensure_ascii=False,
-            )
-
-            with path.open(
-                "rb"
-            ) as file_handle:
-                response = requests.post(
+    """Update cards in place and checkpoint each acknowledged upload."""
+    message_ids = list(old_message_ids or [])
+    with tempfile.TemporaryDirectory(prefix="ow-summary-") as temp_dir:
+        paths = generate_summary_cards(patch, Path(temp_dir))
+        for index, path in enumerate(paths):
+            payload = {
+                "content": f"**자동 요약 카드 [{index + 1}/{len(paths)}]**",
+                "allowed_mentions": {"parse": []},
+                "attachments": [{"id": 0, "filename": path.name}],
+            }
+            existing = index < len(message_ids)
+            endpoint = (discord_message_url(webhook_url, message_ids[index])
+                        if existing else webhook_base_url(webhook_url) + "?wait=true")
+            with path.open("rb") as file_handle:
+                response = (requests.patch if existing else requests.post)(
                     endpoint,
-                    data={
-                        "payload_json": payload_json
-                    },
-                    files={
-                        "files[0]": (
-                            path.name,
-                            file_handle,
-                            "image/png",
-                        )
-                    },
+                    data={"payload_json": json.dumps(payload, ensure_ascii=False)},
+                    files={"files[0]": (path.name, file_handle, "image/png")},
                     timeout=60,
                 )
-
+                if existing and response.status_code == 404:
+                    file_handle.seek(0)
+                    response = requests.post(
+                        webhook_base_url(webhook_url) + "?wait=true",
+                        data={"payload_json": json.dumps(payload, ensure_ascii=False)},
+                        files={"files[0]": (path.name, file_handle, "image/png")},
+                        timeout=60,
+                    )
             response.raise_for_status()
-
-            data = response.json()
-
-            message_id = str(
-                data.get(
-                    "id",
-                    "",
-                )
-            ).strip()
-
+            message_id = str(response.json().get("id", "")).strip()
             if not message_id:
-                raise RuntimeError(
-                    "Discord가 요약 카드 message_id를 반환하지 않았습니다."
-                )
+                raise RuntimeError("Discord가 요약 카드 message_id를 반환하지 않았습니다.")
+            if existing:
+                message_ids[index] = message_id
+            else:
+                message_ids.append(message_id)
+            if on_progress:
+                on_progress(message_ids.copy())
+            time.sleep(1)
 
-            message_ids.append(
-                message_id
-            )
-
-            time.sleep(
-                1
-            )
-
+        while len(message_ids) > len(paths):
+            delete_discord_message(webhook_url, message_ids[-1])
+            message_ids.pop()
+            if on_progress:
+                on_progress(message_ids.copy())
         return message_ids
 
 
@@ -3095,41 +3073,15 @@ def refresh_summary_cards(
     webhook_url: str,
     patch: Patch,
     old_summary_message_ids: list[str],
+    on_progress: Callable[[list[str]], None] | None = None,
 ) -> list[str]:
-    """
-    새 요약을 먼저 올린 뒤 기존 요약을 삭제합니다.
-    새 요약 생성/전송 실패 시 기존 요약이 남아 있도록 하는 안전장치입니다.
-    """
-    new_ids = send_summary_cards(
-        webhook_url,
-        patch,
-    )
-
-    for message_id in old_summary_message_ids:
-        try:
-            delete_discord_message(
-                webhook_url,
-                str(
-                    message_id
-                ),
-            )
-
-            time.sleep(
-                0.35
-            )
-
-        except requests.RequestException as exc:
-            print(
-                f"기존 요약 메시지 삭제 실패 "
-                f"({message_id}): {exc}"
-            )
-
-    return new_ids
+    return send_summary_cards(webhook_url, patch, old_summary_message_ids, on_progress)
 
 
 # ============================================================
 # Discord 텍스트 + 이미지 Payload 생성
 # ============================================================
+
 
 def format_summary(
     patch: Patch,
@@ -3459,61 +3411,9 @@ def webhook_base_url(
 def send_to_discord(
     webhook_url: str,
     payloads: list[dict],
+    on_progress: Callable[[list[str]], None] | None = None,
 ) -> list[str]:
-    base = webhook_base_url(
-        webhook_url
-    )
-
-    endpoint = (
-        base
-        + "?wait=true"
-    )
-
-    message_ids: list[str] = []
-
-    for payload in decorate_payloads(
-        payloads
-    ):
-        response = requests.post(
-            endpoint,
-            json={
-                "username": "오버워치 패치 알림",
-                "content": payload[
-                    "content"
-                ],
-                "embeds": payload[
-                    "embeds"
-                ],
-                "allowed_mentions": {
-                    "parse": []
-                },
-            },
-            timeout=30,
-        )
-
-        response.raise_for_status()
-
-        data = response.json()
-
-        message_id = str(
-            data.get(
-                "id",
-                "",
-            )
-        ).strip()
-
-        if not message_id:
-            raise RuntimeError(
-                "Discord가 message_id를 반환하지 않았습니다."
-            )
-
-        message_ids.append(
-            message_id
-        )
-
-        time.sleep(1)
-
-    return message_ids
+    return sync_discord_messages(webhook_url, [], payloads, on_progress)
 
 
 def discord_message_url(
@@ -3577,119 +3477,56 @@ def sync_discord_messages(
     webhook_url: str,
     old_message_ids: list[str],
     new_payloads: list[dict],
+    on_progress: Callable[[list[str]], None] | None = None,
 ) -> list[str]:
-    """
-    텍스트와 이미지가 추가/삭제돼 메시지 개수가 달라져도
-    기존 Discord 메시지 묶음을 새 패치 내용과 일치시킵니다.
-    """
-    old_ids = [
-        str(item)
-        for item in old_message_ids
-        if str(item).strip()
-    ]
-
-    payloads = decorate_payloads(
-        new_payloads
-    )
-
-    final_ids: list[str] = []
-
-    shared = min(
-        len(old_ids),
-        len(payloads),
-    )
-
-    # 기존 메시지 수정
-    for index in range(
-        shared
-    ):
-        edit_discord_message(
-            webhook_url,
-            old_ids[index],
-            payloads[index],
+    """Retry edits safely and retain every acknowledged new message ID."""
+    message_ids = [str(item) for item in old_message_ids if str(item).strip()]
+    payloads = decorate_payloads(new_payloads)
+    for index, payload in enumerate(payloads):
+        existing = index < len(message_ids)
+        if existing:
+            try:
+                edit_discord_message(webhook_url, message_ids[index], payload)
+                time.sleep(0.5)
+                continue
+            except requests.HTTPError as exc:
+                if exc.response is None or exc.response.status_code != 404:
+                    raise
+        response = requests.post(
+            webhook_base_url(webhook_url) + "?wait=true",
+            json={
+                "username": "오버워치 패치 알림",
+                "content": payload["content"],
+                "embeds": payload["embeds"],
+                "allowed_mentions": {"parse": []},
+            },
+            timeout=30,
         )
+        response.raise_for_status()
+        message_id = str(response.json().get("id", "")).strip()
+        if not message_id:
+            raise RuntimeError("Discord가 message_id를 반환하지 않았습니다.")
+        if existing:
+            message_ids[index] = message_id
+        else:
+            message_ids.append(message_id)
+        if on_progress:
+            on_progress(message_ids.copy())
+        time.sleep(1)
 
-        final_ids.append(
-            old_ids[index]
-        )
-
+    while len(message_ids) > len(payloads):
+        delete_discord_message(webhook_url, message_ids[-1])
+        message_ids.pop()
+        if on_progress:
+            on_progress(message_ids.copy())
         time.sleep(0.5)
-
-    # 새 메시지가 더 많으면 추가
-    if (
-        len(payloads)
-        > len(old_ids)
-    ):
-        endpoint = (
-            webhook_base_url(
-                webhook_url
-            )
-            + "?wait=true"
-        )
-
-        for payload in payloads[
-            len(old_ids):
-        ]:
-            response = requests.post(
-                endpoint,
-                json={
-                    "username": "오버워치 패치 알림",
-                    "content": payload[
-                        "content"
-                    ],
-                    "embeds": payload[
-                        "embeds"
-                    ],
-                    "allowed_mentions": {
-                        "parse": []
-                    },
-                },
-                timeout=30,
-            )
-
-            response.raise_for_status()
-
-            data = response.json()
-
-            message_id = str(
-                data.get(
-                    "id",
-                    "",
-                )
-            ).strip()
-
-            if not message_id:
-                raise RuntimeError(
-                    "Discord가 추가 메시지의 message_id를 반환하지 않았습니다."
-                )
-
-            final_ids.append(
-                message_id
-            )
-
-            time.sleep(1)
-
-    # 기존 메시지가 더 많으면 삭제
-    elif (
-        len(old_ids)
-        > len(payloads)
-    ):
-        for message_id in old_ids[
-            len(payloads):
-        ]:
-            delete_discord_message(
-                webhook_url,
-                message_id,
-            )
-
-            time.sleep(0.5)
-
-    return final_ids
+    return message_ids
 
 
 # ============================================================
 # state.json
 # ============================================================
+
 
 def empty_state() -> dict:
     return {
@@ -3789,7 +3626,7 @@ def make_record(
         "status": status,
         "discord_message_ids": [],
         "summary_message_ids": [],
-        "summary_card_version": SUMMARY_CARD_VERSION,
+        "summary_card_version": 0,
         "first_seen_utc": now,
         "last_seen_utc": now,
     }
@@ -3861,15 +3698,15 @@ def save_state(
         for record in records
     }
 
-    STATE_FILE.write_text(
-        json.dumps(
-            state,
-            ensure_ascii=False,
-            indent=2,
+    temporary_path = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
+    try:
+        temporary_path.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
-    )
+        os.replace(temporary_path, STATE_FILE)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
 
 
 def migrate_legacy_state(
@@ -4168,399 +4005,157 @@ def find_cross_source_duplicate(
 # 패치 처리
 # ============================================================
 
-def process_patch(
-    patch: Patch,
-    state: dict,
-    webhook_url: str,
-) -> str:
-    records: dict = state.setdefault(
-        "patches",
-        {},
+def summary_is_current(record: dict, patch: Patch) -> bool:
+    return (
+        record.get("summary_card_version", 0) == SUMMARY_CARD_VERSION
+        and record.get("summary_body_hash") == patch.body_hash
+        and record.get("summary_image_hash") == patch.image_hash
+        and (bool(record.get("summary_message_ids")) or record.get("summary_empty") is True)
     )
 
-    record = records.get(
-        patch.patch_id
-    )
 
-    print(
-        f"\n[{patch.source_name.upper()} / {patch.patch_id}] "
-        f"{patch.title} / 이미지 {len(patch.images)}장"
-    )
+def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
+    records = state.setdefault("patches", {})
+    record = records.get(patch.patch_id)
+    language = check_korean_patch(patch.items)
+    print(f"\n[{patch.source_name.upper()} / {patch.patch_id}] {patch.title}")
+    print(f"언어 판별: {language.reason} ({describe_language(language)})")
 
-    language = check_korean_patch(
-        patch.items
-    )
-
-    print(
-        f"언어 판별: {language.reason} "
-        f"({describe_language(language)})"
-    )
-
-    # 이미 다른 공식 소스에서 같은 패치를 보낸 경우 중복 전송 방지
     if record is None:
-        duplicate = find_cross_source_duplicate(
-            patch,
-            records,
-        )
-
+        duplicate = find_cross_source_duplicate(patch, records)
         if duplicate is not None:
-            original_id, original_record = duplicate
-
-            alias = make_record(
-                patch,
-                "duplicate_source",
-            )
-
-            alias[
-                "duplicate_of"
-            ] = original_id
-
-            alias[
-                "discord_message_ids"
-            ] = []
-
-            records[
-                patch.patch_id
-            ] = alias
-
-            print(
-                f"다른 공식 소스의 동일 패치로 판단 "
-                f"→ 중복 전송 안 함 ({original_id})"
-            )
-
+            original_id, _ = duplicate
+            record = make_record(patch, "duplicate_source")
+            record["duplicate_of"] = original_id
+            records[patch.patch_id] = record
+            print(f"다른 공식 소스에서 전송한 패치 → 중복 제외 ({original_id})")
             return "duplicate_source"
 
-    # 이미 중복 소스로 판정된 기록
-    if (
-        record
-        and record.get(
-            "status"
-        ) == "duplicate_source"
-    ):
-        update_seen_record(
-            record,
-            patch,
-            update_hashes=True,
-        )
-
-        print(
-            "이미 다른 공식 소스와 중복 처리됨 → 전송 안 함"
-        )
-
+    if record and record.get("status") == "duplicate_source":
+        update_seen_record(record, patch)
         return "duplicate_source"
 
-    # --------------------------------------------------------
-    # 이미 전송한 패치
-    # --------------------------------------------------------
-    if (
-        record
-        and record.get(
-            "status"
-        ) == "sent"
-    ):
-        # 구버전 state에는 image_hash가 없을 수 있습니다.
-        # 새 버전 적용만으로 과거 패치를 대량 수정하지 않도록
-        # 첫 확인에서는 현재 이미지 상태만 기준선으로 기록합니다.
-        old_image_hash = record.get(
-            "image_hash"
-        )
-
-        if old_image_hash is None:
-            record[
-                "image_hash"
-            ] = patch.image_hash
-
-            record[
-                "image_count"
-            ] = len(
-                patch.images
-            )
-
-            image_changed = False
-
-        else:
-            image_changed = (
-                old_image_hash
-                != patch.image_hash
-            )
-
-        text_changed = (
-            record.get(
-                "body_hash"
-            )
-            != patch.body_hash
-        )
-
-        if (
-            not text_changed
-            and not image_changed
-        ):
-            update_seen_record(
-                record,
-                patch,
-                update_hashes=False,
-            )
-
-            print(
-                "이미 전송 완료 → 본문/이미지 변경 없음"
-            )
-
-            return "already_sent"
-
-        print(
-            f"기존 패치 변경 감지 "
-            f"(본문={text_changed}, 이미지={image_changed})"
-        )
-
-        if not language.is_korean:
-            record[
-                "pending_body_hash"
-            ] = patch.body_hash
-
-            record[
-                "pending_image_hash"
-            ] = patch.image_hash
-
-            update_seen_record(
-                record,
-                patch,
-                update_hashes=False,
-            )
-
-            print(
-                "수정본이 영어 또는 불확실 "
-                "→ 기존 Discord 메시지 유지"
-            )
-
-            return "pending_korean"
-
-        old_message_ids = record.get(
-            "discord_message_ids",
-            [],
-        )
-
-        if not isinstance(
-            old_message_ids,
-            list,
-        ):
-            old_message_ids = []
-
-        if not old_message_ids:
-            update_seen_record(
-                record,
-                patch,
-                update_hashes=True,
-            )
-
-            record[
-                "last_uneditable_change_utc"
-            ] = datetime.now(
-                timezone.utc
-            ).isoformat()
-
-            print(
-                "변경 확인 / 기존 Discord message_id 없음 "
-                "→ 중복 전송 없이 수정 생략"
-            )
-
-            return (
-                "update_skipped_no_message_id"
-            )
-
-        payloads = build_discord_payloads(
-            patch
-        )
-
-        final_ids = sync_discord_messages(
-            webhook_url,
-            old_message_ids,
-            payloads,
-        )
-
-        update_seen_record(
-            record,
-            patch,
-            update_hashes=True,
-        )
-
-        record[
-            "discord_message_ids"
-        ] = final_ids
-
-        old_summary_ids = record.get(
-            "summary_message_ids",
-            [],
-        )
-
-        if not isinstance(
-            old_summary_ids,
-            list,
-        ):
-            old_summary_ids = []
-
-        # 본문 수정 시 요약 카드도 새 내용으로 갱신
-        summary_ids = refresh_summary_cards(
-            webhook_url,
-            patch,
-            old_summary_ids,
-        )
-
-        record[
-            "summary_message_ids"
-        ] = summary_ids
-
-        record[
-            "summary_card_version"
-        ] = SUMMARY_CARD_VERSION
-
-        record[
-            "last_edited_at_utc"
-        ] = datetime.now(
-            timezone.utc
-        ).isoformat()
-
-        record.pop(
-            "pending_body_hash",
-            None,
-        )
-
-        record.pop(
-            "pending_image_hash",
-            None,
-        )
-
-        print(
-            f"기존 Discord 메시지 수정 완료 "
-            f"({len(final_ids)}개 / 이미지 {len(patch.images)}장 / "
-            f"요약 카드 {len(summary_ids)}장)"
-        )
-
-        return "updated"
-
-    # --------------------------------------------------------
-    # 아직 전송하지 않은 패치
-    # --------------------------------------------------------
+    was_sent = bool(record and record.get("status") == "sent")
     if not language.is_korean:
         if record is None:
-            record = make_record(
-                patch,
-                "pending_korean",
-            )
-
-            records[
-                patch.patch_id
-            ] = record
-
+            record = make_record(patch, "pending_korean")
+            records[patch.patch_id] = record
         else:
-            update_seen_record(
-                record,
-                patch,
-                update_hashes=True,
-            )
-
-            record[
-                "status"
-            ] = (
-                "pending_korean"
-            )
-
-        record[
-            "language_reason"
-        ] = language.reason
-
-        print(
-            "영문 또는 불확실 "
-            "→ Discord 전송 안 함 / 한국어판 대기"
-        )
-
+            # Do not discard a completed/partial Korean delivery while English is shown.
+            update_seen_record(record, patch, update_hashes=False)
+        record["language_reason"] = language.reason
+        record["pending_body_hash"] = patch.body_hash
+        record["pending_image_hash"] = patch.image_hash
+        print("영문 또는 불확실 → Discord 전송 안 함 / 한국어판 대기")
         return "pending_korean"
 
-    # 한국어 패치 최초 전송
-    payloads = build_discord_payloads(
-        patch
-    )
-
-    message_ids = send_to_discord(
-        webhook_url,
-        payloads,
-    )
-
-    # 원본 패치노트 전송 완료 후 바로 아래에 자동 요약 카드 전송
-    summary_message_ids = send_summary_cards(
-        webhook_url,
-        patch,
-    )
-
-    now = datetime.now(
-        timezone.utc
-    ).isoformat()
-
     if record is None:
-        record = make_record(
-            patch,
-            "sent",
-        )
+        record = make_record(patch, "sending")
+        records[patch.patch_id] = record
 
-        records[
-            patch.patch_id
-        ] = record
-
-    else:
-        update_seen_record(
-            record,
-            patch,
-            update_hashes=True,
-        )
-
-        record[
-            "status"
-        ] = "sent"
-
-        record[
-            "sent_at_utc"
-        ] = now
-
-    record[
-        "discord_message_ids"
-    ] = message_ids
-
-    record[
-        "summary_message_ids"
-    ] = summary_message_ids
-
-    record[
-        "summary_card_version"
-    ] = SUMMARY_CARD_VERSION
-
-    record[
-        "language_reason"
-    ] = language.reason
-
-    record[
-        "sent_source"
-    ] = patch.source_name
-
-    print(
-        f"한국어 패치 → Discord 전송 완료 "
-        f"({len(message_ids)}개 원본 메시지 / "
-        f"공식 이미지 {len(patch.images)}장 / "
-        f"요약 카드 {len(summary_message_ids)}장 / ID 저장)"
+    changed = (
+        record.get("body_hash") != patch.body_hash
+        or record.get("image_hash", patch.image_hash) != patch.image_hash
     )
+    # Old code consumed an update without actually delivering it. Recover it once.
+    recover_skipped = bool(record.get("last_uneditable_change_utc"))
+    text_needed = not was_sent or changed or recover_skipped
+    # A fresh installation deliberately baselines old posts; do not backfill those.
+    fresh_baseline = record.get("migration") == "fresh_install_baseline"
+    cards_needed = not summary_is_current(record, patch) and not (fresh_baseline and not text_needed)
 
-    return "sent"
+    def checkpoint(field: str, ids: list[str]) -> None:
+        record[field] = ids
+        save_state(state)
+
+    if text_needed:
+        if was_sent and not record.get("discord_message_ids"):
+            print("기존 메시지 ID 없음 → 수정본을 한 번 새로 전송하고 ID 저장")
+        record["status"] = "sending"
+        # An interrupted edit must resume even if the source reverts to the old hash.
+        save_state(state)
+        message_ids = sync_discord_messages(
+            webhook_url,
+            record.get("discord_message_ids", []),
+            build_discord_payloads(patch),
+            lambda ids: checkpoint("discord_message_ids", ids),
+        )
+        record["discord_message_ids"] = message_ids
+        update_seen_record(record, patch)
+        record["status"] = "sent"
+        record.setdefault("sent_at_utc", datetime.now(timezone.utc).isoformat())
+        record["last_edited_at_utc"] = datetime.now(timezone.utc).isoformat()
+        record["sent_source"] = patch.source_name
+        record.pop("last_uneditable_change_utc", None)
+        record.pop("migration", None)
+        # Commit the text before card generation can fail.
+        save_state(state)
+    else:
+        update_seen_record(record, patch, update_hashes=False)
+
+    if cards_needed:
+        summary_ids = refresh_summary_cards(
+            webhook_url, patch, record.get("summary_message_ids", []),
+            lambda ids: checkpoint("summary_message_ids", ids),
+        )
+        record["summary_message_ids"] = summary_ids
+        record["summary_card_version"] = SUMMARY_CARD_VERSION
+        record["summary_body_hash"] = patch.body_hash
+        record["summary_image_hash"] = patch.image_hash
+        record["summary_empty"] = not summary_ids
+        save_state(state)
+
+    record["language_reason"] = language.reason
+    record.pop("pending_body_hash", None)
+    record.pop("pending_image_hash", None)
+    if text_needed:
+        return "updated" if was_sent else "sent"
+    if cards_needed:
+        print("기존 패치 요약 카드 보완 완료")
+        return "updated"
+    print("이미 전송 완료 → 변경 없음")
+    return "already_sent"
+
+
+def preview_patches(patches: list[Patch], state: dict) -> None:
+    """Read-only diagnostics: no Discord calls, no state migration or writes."""
+    print("\n===== DRY_RUN: Discord 전송 및 state.json 저장 없음 =====")
+    records = state.get("patches", {})
+    for patch in patches:
+        record = records.get(patch.patch_id, {})
+        if not check_korean_patch(patch.items).is_korean:
+            action = "한국어 대기"
+        elif record.get("status") == "duplicate_source" or (
+            not record and find_cross_source_duplicate(patch, records)
+        ):
+            action = "다른 소스와 중복"
+        elif record.get("status") != "sent":
+            action = "신규/미완료 전송 대상"
+        elif (record.get("body_hash") != patch.body_hash
+              or record.get("image_hash", patch.image_hash) != patch.image_hash
+              or record.get("last_uneditable_change_utc")):
+            action = "기존 메시지 수정/ID 없는 수정본 복구 대상"
+        elif (record.get("migration") != "fresh_install_baseline"
+              and not summary_is_current(record, patch)):
+            action = "요약 카드 보완 대상"
+        else:
+            action = "변경 없음"
+        print(f"{patch.patch_id}: {action} / {patch.title}")
 
 
 # ============================================================
 # main
 # ============================================================
 
+
 def main() -> int:
+    dry_run = os.getenv("DRY_RUN", "false").lower() == "true"
     webhook_url = os.getenv(
         "DISCORD_WEBHOOK_URL",
         "",
     ).strip()
 
-    if not webhook_url:
+    if not webhook_url and not dry_run:
         print(
             "DISCORD_WEBHOOK_URL 환경 변수가 없습니다.",
             file=sys.stderr,
@@ -4583,6 +4178,9 @@ def main() -> int:
         return 1
 
     state = load_state()
+    if dry_run:
+        preview_patches(patches, state)
+        return 0
 
     migrated = migrate_legacy_state(
         state,
