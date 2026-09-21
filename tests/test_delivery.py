@@ -77,6 +77,24 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.process(), "already_sent")
         self.assertEqual(self.post.call_count, 2)
 
+    def test_card_version_upgrade_edits_existing_card_once_without_resending_text(self):
+        record = self.legacy_record()
+        record.update({
+            "discord_message_ids": ["text-1"],
+            "summary_message_ids": ["card-1"],
+            "summary_card_version": monitor.SUMMARY_CARD_VERSION - 1,
+            "summary_body_hash": self.patch.body_hash,
+        })
+        self.assertEqual(self.process(), "updated")
+        self.edit.assert_called_once()
+        self.assertIn("/messages/card-1", self.edit.call_args.args[0])
+        self.assertIn("files", self.edit.call_args.kwargs)
+        self.post.assert_not_called()
+        self.payloads.assert_not_called()
+        self.assertEqual(self.reload()["summary_card_version"], monitor.SUMMARY_CARD_VERSION)
+        self.assertEqual(self.process(), "already_sent")
+        self.assertEqual(self.edit.call_count, 1)
+
     def test_previously_discarded_update_is_recovered(self):
         record = self.legacy_record()
         record["last_uneditable_change_utc"] = "2026-09-16T00:00:00Z"

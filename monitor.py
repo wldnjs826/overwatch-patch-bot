@@ -17,7 +17,8 @@ from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import requests
 from bs4 import BeautifulSoup, Tag
-from PIL import Image, ImageDraw, ImageFont
+from summary_text import compact_change
+from summary_cards import render_cards
 
 
 # ============================================================
@@ -54,13 +55,7 @@ DISCORD_EMBEDS_PER_MESSAGE = 10
 # 자동 요약 카드 설정
 # ============================================================
 
-SUMMARY_CARD_WIDTH = 900
-SUMMARY_CARD_HEIGHT = 1150
-SUMMARY_CARD_MARGIN = 58
-SUMMARY_CARD_VERSION = 1
-
-# 카드 한 장에 다 안 들어가면 자동으로 다음 장을 생성합니다.
-SUMMARY_MAX_CHANGE_LINES_PER_HERO = 8
+SUMMARY_CARD_VERSION = 2
 
 # 패치에 영웅 밸런스 변경이 없을 때 만드는 일반 핵심 요약의 최대 항목 수.
 SUMMARY_GENERIC_MAX_ITEMS = 16
@@ -116,6 +111,7 @@ LOWER_IS_BETTER_KEYWORDS = (
     "시전시간",
     "지연 시간",
     "지연시간",
+    "회복 시간",
     "충전 시간",
     "충전시간",
     "후딜",
@@ -139,6 +135,8 @@ HIGHER_IS_BETTER_KEYWORDS = (
     "사거리",
     "이동 속도",
     "이동속도",
+    "추가 속도",
+    "추가속도",
     "투사체 속도",
     "투사체속도",
     "발사 속도",
@@ -149,8 +147,8 @@ HIGHER_IS_BETTER_KEYWORDS = (
 )
 
 CHANGE_NUMBER_RE = re.compile(
-    r"(-?\d+(?:\.\d+)?)\s*(%|초|m|M|미터|)?\s*(?:→|->|에서)\s*"
-    r"(-?\d+(?:\.\d+)?)",
+    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*(%p|%|밀리초|초|m/s|m|미터/초|미터|)?\s*(?:→|->|에서)\s*"
+    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*(%p|%|밀리초|초|m/s|m|미터/초|미터)?",
     re.IGNORECASE,
 )
 
@@ -1731,7 +1729,7 @@ def _looks_like_change_line(value: str) -> bool:
     if not text:
         return False
 
-    if len(text) > 220:
+    if text.startswith(("개발자의 의견", "개발자 의견", "Developer Comments")):
         return False
 
     markers = (
@@ -1754,6 +1752,11 @@ def _looks_like_change_line(value: str) -> bool:
         "사거리",
         "속도",
         "범위",
+        "추가",
+        "제거",
+        "변경",
+        "수정",
+        "시각 효과",
     )
 
     return any(
@@ -1774,12 +1777,18 @@ def _extract_numeric_direction(text: str) -> int:
     )
 
     if match:
+        units = {"m": "미터", "m/s": "미터/초"}
+        before_unit = units.get(match.group(2), match.group(2))
+        after_unit = units.get(match.group(4), match.group(4))
+        if before_unit and after_unit and before_unit != after_unit:
+            # Do not compare raw magnitudes across units (e.g. 1s -> 500ms).
+            return 0
         before = float(
-            match.group(1)
+            match.group(1).replace(",", "")
         )
 
         after = float(
-            match.group(3)
+            match.group(3).replace(",", "")
         )
 
         if after > before:
@@ -1787,6 +1796,7 @@ def _extract_numeric_direction(text: str) -> int:
 
         if after < before:
             return -1
+        return 0
 
     # 'A에서 B로 증가/감소'처럼 정규식이 안 잡히는 문장 보조
     if "증가" in text:
@@ -1806,19 +1816,38 @@ def classify_change_line(text: str) -> str:
     애매한 변화는 무리하게 상향/하향으로 단정하지 않고 '조정'으로 보냅니다.
     """
     normalized = clean_text(text).lower()
+    # Ability names are context, not evidence of a buff (e.g. '강화 사격:').
+    normalized = normalized.rsplit(":", 1)[-1].strip()
+    if re.search(r"(?:증가|감소|상향|하향|강화|약화).{0,12}(?:않|아니|못)", normalized):
+        return "adjust"
+    if (len(CHANGE_NUMBER_RE.findall(normalized)) > 1
+            or len(re.findall(r"(?:증가|감소)(?!량)", normalized)) > 1):
+        # Multiple metrics can have opposite benefits; retain a neutral label.
+        return "adjust"
     direction = _extract_numeric_direction(
         normalized
     )
 
+    numeric = re.search(r"[-+]?\d", normalized)
+    metric = normalized[:numeric.start()] if numeric else normalized
+
     lower_is_better = any(
-        keyword in normalized
+        keyword in metric
         for keyword in LOWER_IS_BETTER_KEYWORDS
     )
 
+    # '회복 시간' is a cost, while bare '회복' is a benefit.
+    higher_context = metric
+    for keyword in LOWER_IS_BETTER_KEYWORDS:
+        higher_context = higher_context.replace(keyword, " ")
+
     higher_is_better = any(
-        keyword in normalized
+        keyword in higher_context
         for keyword in HIGHER_IS_BETTER_KEYWORDS
     )
+
+    if lower_is_better and (higher_is_better or re.search(r"감소(?:량|율| 효과| 비율)", metric)):
+        return "adjust"
 
     if direction != 0:
         if lower_is_better:
@@ -1836,16 +1865,10 @@ def classify_change_line(text: str) -> str:
             )
 
     # 명시적인 표현이 있는 경우
-    if (
-        "상향" in normalized
-        or "강화" in normalized
-    ):
+    if re.search(r"(?:상향|강화)(?:되었습니다|됩니다|했습니다|합니다|됨|함)(?=$|[\s.!?])", normalized):
         return "buff"
 
-    if (
-        "하향" in normalized
-        or "약화" in normalized
-    ):
+    if re.search(r"(?:하향|약화)(?:되었습니다|됩니다|했습니다|합니다|됨|함)(?=$|[\s.!?])", normalized):
         return "nerf"
 
     return "adjust"
@@ -1944,9 +1967,7 @@ def extract_balance_summary(
             {
                 "role": role,
                 "hero": hero,
-                "changes": changes[
-                    :SUMMARY_MAX_CHANGE_LINES_PER_HERO
-                ],
+                "changes": changes,
                 "category": category,
             }
         )
@@ -2044,975 +2065,34 @@ def _find_font_path(
     )
 
 
-def _font(
-    size: int,
-    bold: bool = False,
-) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(
-        _find_font_path(
-            bold
-        ),
-        size=size,
-    )
-
-
-def _draw_hex_background(
-    draw: ImageDraw.ImageDraw,
-) -> None:
-    # 아주 옅은 벌집 패턴
-    outline = (
-        232,
-        238,
-        238,
-    )
-
-    radius = 48
-    x_step = 72
-    y_step = 84
-
-    for row, y in enumerate(
-        range(
-            110,
-            SUMMARY_CARD_HEIGHT,
-            y_step,
-        )
-    ):
-        offset = (
-            0
-            if row % 2 == 0
-            else x_step // 2
-        )
-
-        for x in range(
-            -20 + offset,
-            SUMMARY_CARD_WIDTH,
-            x_step,
-        ):
-            points = []
-
-            for angle in (
-                0,
-                60,
-                120,
-                180,
-                240,
-                300,
-            ):
-                import math
-
-                rad = math.radians(
-                    angle
-                )
-
-                points.append(
-                    (
-                        x
-                        + radius
-                        * math.cos(rad),
-                        y
-                        + radius
-                        * math.sin(rad),
-                    )
-                )
-
-            draw.line(
-                points
-                + [
-                    points[0]
-                ],
-                fill=outline,
-                width=2,
-            )
-
-
-def _wrap_text(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    font: ImageFont.FreeTypeFont,
-    max_width: int,
-) -> list[str]:
-    """
-    한글도 띄어쓰기 단위로 감싸고,
-    너무 긴 토큰은 글자 단위로 추가 분리합니다.
-    """
-    words = text.split()
-
-    if not words:
-        return []
-
-    lines: list[str] = []
-    current = ""
-
-    for word in words:
-        candidate = (
-            f"{current} {word}".strip()
-        )
-
-        width = draw.textbbox(
-            (0, 0),
-            candidate,
-            font=font,
-        )[2]
-
-        if width <= max_width:
-            current = candidate
-            continue
-
-        if current:
-            lines.append(
-                current
-            )
-
-        # 단일 단어도 너무 긴 경우 글자 단위 분할
-        if (
-            draw.textbbox(
-                (0, 0),
-                word,
-                font=font,
-            )[2]
-            > max_width
-        ):
-            part = ""
-
-            for char in word:
-                c = part + char
-
-                if (
-                    draw.textbbox(
-                        (0, 0),
-                        c,
-                        font=font,
-                    )[2]
-                    <= max_width
-                ):
-                    part = c
-
-                else:
-                    if part:
-                        lines.append(
-                            part
-                        )
-
-                    part = char
-
-            current = part
-
-        else:
-            current = word
-
-    if current:
-        lines.append(
-            current
-        )
-
-    return lines
-
-
-SUMMARY_STYLE = {
-    "buff": {
-        "title": "상향",
-        "accent": (
-            79,
-            187,
-            151,
-        ),
-        "symbol": "↑",
-    },
-    "nerf": {
-        "title": "하향",
-        "accent": (
-            191,
-            54,
-            88,
-        ),
-        "symbol": "↓",
-    },
-    "adjust": {
-        "title": "조정",
-        "accent": (
-            221,
-            120,
-            29,
-        ),
-        "symbol": "↕",
-    },
-    "summary": {
-        "title": "핵심 요약",
-        "accent": (
-            79,
-            150,
-            194,
-        ),
-        "symbol": "◆",
-    },
-}
-
-
-def _estimate_hero_height(
-    draw: ImageDraw.ImageDraw,
-    entry: dict,
-    body_font: ImageFont.FreeTypeFont,
-) -> int:
-    max_width = (
-        SUMMARY_CARD_WIDTH
-        - SUMMARY_CARD_MARGIN * 2
-        - 255
-    )
-
-    line_count = 0
-
-    for change in entry[
-        "changes"
-    ]:
-        wrapped = _wrap_text(
-            draw,
-            change,
-            body_font,
-            max_width,
-        )
-
-        line_count += max(
-            1,
-            len(
-                wrapped
-            ),
-        )
-
-    return max(
-        92,
-        36
-        + line_count * 35,
-    )
-
-
-def _paginate_summary_entries(
-    category: str,
-    entries: list[dict],
-) -> list[list[dict]]:
-    """
-    실제 렌더링 높이에 맞춰 자동 페이지 분리.
-    """
-    canvas = Image.new(
-        "RGB",
-        (
-            SUMMARY_CARD_WIDTH,
-            SUMMARY_CARD_HEIGHT,
-        ),
-        "white",
-    )
-
-    draw = ImageDraw.Draw(
-        canvas
-    )
-
-    body_font = _font(
-        27,
-        False,
-    )
-
-    available = (
-        SUMMARY_CARD_HEIGHT
-        - 225
-    )
-
-    pages: list[
-        list[dict]
-    ] = []
-
-    current: list[dict] = []
-    used = 0
-    previous_role = None
-
-    for entry in entries:
-        height = _estimate_hero_height(
-            draw,
-            entry,
-            body_font,
-        )
-
-        if (
-            entry["role"]
-            != previous_role
-        ):
-            height += 52
-
-        if (
-            current
-            and used + height
-            > available
-        ):
-            pages.append(
-                current
-            )
-
-            current = []
-            used = 0
-            previous_role = None
-
-            height = (
-                _estimate_hero_height(
-                    draw,
-                    entry,
-                    body_font,
-                )
-                + 52
-            )
-
-        current.append(
-            entry
-        )
-
-        used += height
-        previous_role = entry[
-            "role"
+def prepare_card_data(patch: Patch) -> tuple[list[dict], list[dict]]:
+    entries = []
+    for entry in extract_balance_summary(patch):
+        changes = [
+            {**compact_change(line), "category": classify_change_line(line)}
+            for line in entry["changes"]
         ]
-
-    if current:
-        pages.append(
-            current
-        )
-
-    return pages
-
-
-def _render_balance_card(
-    patch: Patch,
-    category: str,
-    entries: list[dict],
-    page_number: int,
-    total_pages: int,
-    output_path: Path,
-) -> None:
-    style = SUMMARY_STYLE[
-        category
-    ]
-
-    image = Image.new(
-        "RGB",
-        (
-            SUMMARY_CARD_WIDTH,
-            SUMMARY_CARD_HEIGHT,
-        ),
-        (
-            248,
-            250,
-            250,
-        ),
-    )
-
-    draw = ImageDraw.Draw(
-        image
-    )
-
-    _draw_hex_background(
-        draw
-    )
-
-    accent = style[
-        "accent"
-    ]
-
-    dark = (
-        50,
-        59,
-        65,
-    )
-
-    # 상단 장식
-    draw.rectangle(
-        (
-            0,
-            0,
-            SUMMARY_CARD_WIDTH,
-            12,
-        ),
-        fill=accent,
-    )
-
-    header_font = _font(
-        64,
-        True,
-    )
-
-    symbol_font = _font(
-        58,
-        True,
-    )
-
-    role_font = _font(
-        31,
-        True,
-    )
-
-    hero_font = _font(
-        27,
-        True,
-    )
-
-    body_font = _font(
-        27,
-        False,
-    )
-
-    small_font = _font(
-        21,
-        False,
-    )
-
-    # 카테고리 아이콘
-    draw.rounded_rectangle(
-        (
-            SUMMARY_CARD_MARGIN,
-            70,
-            SUMMARY_CARD_MARGIN + 92,
-            162,
-        ),
-        radius=18,
-        fill=accent,
-    )
-
-    symbol = style[
-        "symbol"
-    ]
-
-    symbol_box = draw.textbbox(
-        (0, 0),
-        symbol,
-        font=symbol_font,
-    )
-
-    sw = (
-        symbol_box[2]
-        - symbol_box[0]
-    )
-
-    sh = (
-        symbol_box[3]
-        - symbol_box[1]
-    )
-
-    draw.text(
-        (
-            SUMMARY_CARD_MARGIN
-            + 46
-            - sw / 2,
-            116
-            - sh / 2
-            - 6,
-        ),
-        symbol,
-        font=symbol_font,
-        fill="white",
-    )
-
-    draw.text(
-        (
-            SUMMARY_CARD_MARGIN
-            + 112,
-            73,
-        ),
-        style["title"],
-        font=header_font,
-        fill=(
-            24,
-            27,
-            29,
-        ),
-    )
-
-    if total_pages > 1:
-        draw.text(
-            (
-                SUMMARY_CARD_WIDTH
-                - SUMMARY_CARD_MARGIN
-                - 95,
-                126,
-            ),
-            f"{page_number}/{total_pages}",
-            font=small_font,
-            fill=(
-                110,
-                115,
-                118,
-            ),
-            anchor="ra",
-        )
-
-    y = 205
-    current_role = None
-
-    for entry in entries:
-        role = entry[
-            "role"
+        entries.append({**entry, "changes": changes})
+    general = []
+    if not entries:
+        general = [
+            {**compact_change(line), "category": "general"}
+            for line in extract_generic_summary(patch)
         ]
+    return entries, general
 
-        if role != current_role:
-            # 역할 라벨
-            draw.rounded_rectangle(
-                (
-                    SUMMARY_CARD_MARGIN,
-                    y,
-                    SUMMARY_CARD_WIDTH
-                    - SUMMARY_CARD_MARGIN,
-                    y + 45,
-                ),
-                radius=12,
-                fill=(
-                    232,
-                    236,
-                    238,
-                ),
-            )
 
-            draw.text(
-                (
-                    SUMMARY_CARD_MARGIN
-                    + 18,
-                    y + 6,
-                ),
-                role,
-                font=role_font,
-                fill=dark,
-            )
-
-            y += 58
-            current_role = role
-
-        block_height = _estimate_hero_height(
-            draw,
-            entry,
-            body_font,
-        )
-
-        draw.rounded_rectangle(
-            (
-                SUMMARY_CARD_MARGIN,
-                y,
-                SUMMARY_CARD_WIDTH
-                - SUMMARY_CARD_MARGIN,
-                y + block_height,
-            ),
-            radius=18,
-            fill=dark,
-        )
-
-        # 영웅 이름 배지
-        badge_x = (
-            SUMMARY_CARD_MARGIN
-            + 25
-        )
-
-        badge_y = y + 25
-
-        badge_w = 205
-
-        draw.rounded_rectangle(
-            (
-                badge_x,
-                badge_y,
-                badge_x + badge_w,
-                badge_y + 46,
-            ),
-            radius=7,
-            fill=accent,
-        )
-
-        hero_name = entry[
-            "hero"
-        ]
-
-        draw.text(
-            (
-                badge_x
-                + badge_w / 2,
-                badge_y + 23,
-            ),
-            hero_name,
-            font=hero_font,
-            fill="white",
-            anchor="mm",
-        )
-
-        text_x = (
-            badge_x
-            + badge_w
-            + 25
-        )
-
-        text_y = y + 24
-
-        max_width = (
-            SUMMARY_CARD_WIDTH
-            - SUMMARY_CARD_MARGIN
-            - text_x
-            - 20
-        )
-
-        for change in entry[
-            "changes"
-        ]:
-            wrapped = _wrap_text(
-                draw,
-                change,
-                body_font,
-                max_width,
-            )
-
-            if not wrapped:
-                continue
-
-            for index, line in enumerate(
-                wrapped
-            ):
-                prefix = (
-                    "• "
-                    if index == 0
-                    else "  "
-                )
-
-                draw.text(
-                    (
-                        text_x,
-                        text_y,
-                    ),
-                    prefix + line,
-                    font=body_font,
-                    fill=(
-                        245,
-                        247,
-                        248,
-                    ),
-                )
-
-                text_y += 35
-
-        y += (
-            block_height
-            + 12
-        )
-
-    draw.text(
-        (
-            SUMMARY_CARD_WIDTH / 2,
-            SUMMARY_CARD_HEIGHT - 42,
-        ),
-        "OVERWATCH · 자동 요약",
-        font=small_font,
-        fill=(
-            100,
-            108,
-            112,
-        ),
-        anchor="mm",
+def generate_summary_cards(patch: Patch, output_dir: Path) -> list[Path]:
+    entries, general = prepare_card_data(patch)
+    return render_cards(
+        patch_id=patch.patch_id,
+        title=patch.title,
+        date_key=patch.date_key,
+        entries=entries,
+        general_changes=general,
+        output_dir=output_dir,
+        font_path=_find_font_path,
     )
-
-    image.save(
-        output_path,
-        format="PNG",
-        optimize=True,
-    )
-
-
-def _render_generic_card(
-    patch: Patch,
-    items: list[str],
-    output_path: Path,
-) -> None:
-    style = SUMMARY_STYLE[
-        "summary"
-    ]
-
-    image = Image.new(
-        "RGB",
-        (
-            SUMMARY_CARD_WIDTH,
-            SUMMARY_CARD_HEIGHT,
-        ),
-        (
-            248,
-            250,
-            250,
-        ),
-    )
-
-    draw = ImageDraw.Draw(
-        image
-    )
-
-    _draw_hex_background(
-        draw
-    )
-
-    accent = style[
-        "accent"
-    ]
-
-    dark = (
-        50,
-        59,
-        65,
-    )
-
-    header_font = _font(
-        57,
-        True,
-    )
-
-    body_font = _font(
-        28,
-        False,
-    )
-
-    small_font = _font(
-        21,
-        False,
-    )
-
-    draw.rectangle(
-        (
-            0,
-            0,
-            SUMMARY_CARD_WIDTH,
-            12,
-        ),
-        fill=accent,
-    )
-
-    draw.rounded_rectangle(
-        (
-            SUMMARY_CARD_MARGIN,
-            70,
-            SUMMARY_CARD_MARGIN + 92,
-            162,
-        ),
-        radius=18,
-        fill=accent,
-    )
-
-    draw.text(
-        (
-            SUMMARY_CARD_MARGIN
-            + 46,
-            116,
-        ),
-        "◆",
-        font=_font(
-            45,
-            True,
-        ),
-        fill="white",
-        anchor="mm",
-    )
-
-    draw.text(
-        (
-            SUMMARY_CARD_MARGIN
-            + 112,
-            80,
-        ),
-        "핵심 요약",
-        font=header_font,
-        fill=(
-            24,
-            27,
-            29,
-        ),
-    )
-
-    y = 205
-
-    draw.rounded_rectangle(
-        (
-            SUMMARY_CARD_MARGIN,
-            y,
-            SUMMARY_CARD_WIDTH
-            - SUMMARY_CARD_MARGIN,
-            SUMMARY_CARD_HEIGHT
-            - 85,
-        ),
-        radius=20,
-        fill=dark,
-    )
-
-    y += 35
-
-    max_width = (
-        SUMMARY_CARD_WIDTH
-        - SUMMARY_CARD_MARGIN * 2
-        - 70
-    )
-
-    for item in items:
-        wrapped = _wrap_text(
-            draw,
-            item,
-            body_font,
-            max_width,
-        )
-
-        needed = (
-            max(
-                1,
-                len(
-                    wrapped
-                ),
-            )
-            * 39
-            + 18
-        )
-
-        if (
-            y + needed
-            > SUMMARY_CARD_HEIGHT - 120
-        ):
-            break
-
-        for index, line in enumerate(
-            wrapped
-        ):
-            draw.text(
-                (
-                    SUMMARY_CARD_MARGIN
-                    + 35,
-                    y,
-                ),
-                (
-                    "• "
-                    if index == 0
-                    else "  "
-                )
-                + line,
-                font=body_font,
-                fill=(
-                    245,
-                    247,
-                    248,
-                ),
-            )
-
-            y += 39
-
-        y += 14
-
-    draw.text(
-        (
-            SUMMARY_CARD_WIDTH / 2,
-            SUMMARY_CARD_HEIGHT - 42,
-        ),
-        "OVERWATCH · 자동 요약",
-        font=small_font,
-        fill=(
-            100,
-            108,
-            112,
-        ),
-        anchor="mm",
-    )
-
-    image.save(
-        output_path,
-        format="PNG",
-        optimize=True,
-    )
-
-
-def generate_summary_cards(
-    patch: Patch,
-    output_dir: Path,
-) -> list[Path]:
-    """
-    상향 → 하향 → 조정 순으로 카드 생성.
-    해당 분류가 없으면 만들지 않습니다.
-
-    영웅 밸런스 구조를 찾지 못하면 '핵심 요약' 카드 1장을 생성합니다.
-    """
-    output_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    balance = extract_balance_summary(
-        patch
-    )
-
-    paths: list[Path] = []
-
-    category_order = (
-        "buff",
-        "nerf",
-        "adjust",
-    )
-
-    if balance:
-        for category in category_order:
-            category_entries = [
-                entry
-                for entry in balance
-                if entry[
-                    "category"
-                ] == category
-            ]
-
-            if not category_entries:
-                continue
-
-            pages = _paginate_summary_entries(
-                category,
-                category_entries,
-            )
-
-            for page_index, entries in enumerate(
-                pages,
-                start=1,
-            ):
-                path = (
-                    output_dir
-                    / (
-                        f"{patch.patch_id.replace('#', '-')}"
-                        f"-summary-{category}-{page_index}.png"
-                    )
-                )
-
-                _render_balance_card(
-                    patch,
-                    category,
-                    entries,
-                    page_index,
-                    len(
-                        pages
-                    ),
-                    path,
-                )
-
-                paths.append(
-                    path
-                )
-
-    if not paths:
-        generic_items = extract_generic_summary(
-            patch
-        )
-
-        if generic_items:
-            path = (
-                output_dir
-                / (
-                    f"{patch.patch_id.replace('#', '-')}"
-                    "-summary.png"
-                )
-            )
-
-            _render_generic_card(
-                patch,
-                generic_items,
-                path,
-            )
-
-            paths.append(
-                path
-            )
-
-    return paths
 
 
 def send_summary_cards(
