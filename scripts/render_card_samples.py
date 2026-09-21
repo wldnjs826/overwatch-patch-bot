@@ -55,6 +55,10 @@ def main():
     fixture = Path(__file__).resolve().parents[1] / "tests/fixtures/nexon-article.html"
     raw = monitor.parse_nexon_article(fixture.read_text(encoding="utf-8"), "https://overwatch.nexon.com/news/patchnotes/830")
     examples["nexon-fixture"] = monitor.assign_patch_ids([raw])[0]
+    for name in ("nexon-july15", "nexon-sept9"):
+        fixture = Path(__file__).resolve().parents[1] / f"tests/fixtures/{name}.html"
+        raw = monitor.parse_nexon_article(fixture.read_text(encoding="utf-8"), "https://overwatch.nexon.com/news/patchnotes/")
+        examples[name] = monitor.assign_patch_ids([raw])[0]
     destination = Path("card-previews")
     manifest = {}
     with patch("requests.sessions.Session.request", side_effect=AssertionError("Preview must stay offline")):
@@ -63,6 +67,8 @@ def main():
             entries, general = monitor.prepare_card_data(example)
             manifest[name] = {"files": [str(path) for path in paths], "entries": entries, "general": general}
             print(f"Rendered {name}: {len(paths)} cards")
+            if name.startswith("nexon-"):
+                print("Hero classification: " + ", ".join(f"{entry.get('mode', '')} {entry['hero']}={entry['category']}" for entry in entries))
     (destination / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

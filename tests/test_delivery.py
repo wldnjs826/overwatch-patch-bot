@@ -13,7 +13,7 @@ import monitor
 
 
 def response(message_id="message", status=200):
-    result = Mock(status_code=status)
+    result = Mock(status_code=status, headers={})
     result.json.return_value = {"id": message_id}
     if status >= 400:
         result.raise_for_status.side_effect = requests.HTTPError(response=result)
@@ -94,6 +94,61 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.reload()["summary_card_version"], monitor.SUMMARY_CARD_VERSION)
         self.assertEqual(self.process(), "already_sent")
         self.assertEqual(self.edit.call_count, 1)
+
+    def test_rate_limited_upload_retries_full_image_and_checkpoints_once(self):
+        record = self.legacy_record()
+        record["summary_message_ids"] = ["card-1"]
+        limited = response(status=429)
+        limited.json.return_value = {"retry_after": 0.75}
+        uploads = []
+
+        def upload(url, **kwargs):
+            uploads.append(kwargs["files"]["files[0]"][1].read())
+            return limited if len(uploads) == 1 else response("card-1")
+
+        self.edit.side_effect = upload
+        self.assertEqual(self.process(), "updated")
+        self.assertEqual(uploads, [self.card.read_bytes(), self.card.read_bytes()])
+        monitor.time.sleep.assert_any_call(0.75)
+        self.post.assert_not_called()
+        self.assertEqual(self.reload()["summary_message_ids"], ["card-1"])
+        self.assertEqual(self.process(), "already_sent")
+
+    def test_rate_limited_text_post_uses_server_header_and_does_not_duplicate(self):
+        limited = response(status=429)
+        limited.json.side_effect = ValueError("no JSON body")
+        limited.headers = {"Retry-After": "1.25"}
+        self.post.side_effect = [limited, response("text-1"), response("card-1")]
+        self.assertEqual(self.process(), "sent")
+        monitor.time.sleep.assert_any_call(1.25)
+        record = self.reload()
+        self.assertEqual(record["discord_message_ids"], ["text-1"])
+        self.assertEqual(record["summary_message_ids"], ["card-1"])
+        self.assertEqual(self.post.call_count, 3)
+
+    def test_rate_limited_delete_retries_without_removing_unacknowledged_id(self):
+        record = self.legacy_record()
+        record["summary_message_ids"] = ["card-1", "extra-card"]
+        limited = response(status=429)
+        limited.json.return_value = {"retry_after": 0.4}
+        self.delete.side_effect = [limited, response(status=204)]
+        self.assertEqual(self.process(), "updated")
+        monitor.time.sleep.assert_any_call(0.4)
+        self.assertEqual(self.delete.call_count, 2)
+        self.assertEqual(self.reload()["summary_message_ids"], ["card-1"])
+
+    def test_repeated_rate_limit_is_bounded_and_keeps_card_pending(self):
+        record = self.legacy_record()
+        record["summary_message_ids"] = ["card-1"]
+        limited = response(status=429)
+        limited.json.return_value = {"retry_after": 0.1}
+        self.edit.return_value = limited
+        with self.assertRaises(requests.HTTPError):
+            self.process()
+        self.assertEqual(self.edit.call_count, 5)
+        self.assertNotEqual(record["summary_card_version"], monitor.SUMMARY_CARD_VERSION)
+        self.assertEqual(record["summary_message_ids"], ["card-1"])
+        self.post.assert_not_called()
 
     def test_previously_discarded_update_is_recovered(self):
         record = self.legacy_record()

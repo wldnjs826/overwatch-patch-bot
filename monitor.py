@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import sys
@@ -55,7 +56,7 @@ DISCORD_EMBEDS_PER_MESSAGE = 10
 # 자동 요약 카드 설정
 # ============================================================
 
-SUMMARY_CARD_VERSION = 2
+SUMMARY_CARD_VERSION = 3
 
 # 패치에 영웅 밸런스 변경이 없을 때 만드는 일반 핵심 요약의 최대 항목 수.
 SUMMARY_GENERIC_MAX_ITEMS = 16
@@ -120,6 +121,12 @@ LOWER_IS_BETTER_KEYWORDS = (
     "탄 퍼짐",
     "퍼짐",
     "반동",
+    "폭발 지연",
+    "재장전 시간",
+    "재장전시간",
+    "변신 지속 시간",
+    "휘두르기 지속 시간",
+    "연속 공격 지속 시간",
 )
 
 # 값이 커질수록 일반적으로 유리한 항목
@@ -144,11 +151,20 @@ HIGHER_IS_BETTER_KEYWORDS = (
     "탄창",
     "탄약",
     "범위",
+    "재생률",
+    "재생 속도",
+    "배치 거리",
+    "획득 거리",
+    "투사체 크기",
+    "공격 속도",
+    "충전량",
+    "화살 개수",
+    "기술 위력",
 )
 
 CHANGE_NUMBER_RE = re.compile(
-    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*(%p|%|밀리초|초|m/s|m|미터/초|미터|)?\s*(?:→|->|에서)\s*"
-    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*(%p|%|밀리초|초|m/s|m|미터/초|미터)?",
+    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*(%p|%|밀리초|초|m/s|m|미터/초|미터|발|개|회|배)?\s*(?:→|->|에서)\s*"
+    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)\s*(%p|%|밀리초|초|m/s|m|미터/초|미터|발|개|회|배)?",
     re.IGNORECASE,
 )
 
@@ -985,6 +1001,15 @@ def is_nexon_stop_text(
     return False
 
 
+def is_developer_note(node: Tag) -> bool:
+    """Preserve commentary in the original body, but mark it for summary exclusion."""
+    return any(
+        "PatchNotes-dev" in ancestor.get("class", [])
+        for ancestor in (node, *node.parents)
+        if isinstance(ancestor, Tag)
+    )
+
+
 def parse_nexon_article(
     html: str,
     source_url: str,
@@ -1126,7 +1151,7 @@ def parse_nexon_article(
 
         items.append(
             (
-                tag_name,
+                "developer" if is_developer_note(node) else tag_name,
                 text,
             )
         )
@@ -1414,7 +1439,7 @@ def parse_blizzard_page(
 
             items.append(
                 (
-                    node.name,
+                    "developer" if is_developer_note(node) else node.name,
                     text,
                 )
             )
@@ -1815,14 +1840,18 @@ def classify_change_line(text: str) -> str:
     유료 AI 없이 규칙 기반으로 판단합니다.
     애매한 변화는 무리하게 상향/하향으로 단정하지 않고 '조정'으로 보냅니다.
     """
-    normalized = clean_text(text).lower()
+    context = clean_text(text).lower()
+    normalized = context
     # Ability names are context, not evidence of a buff (e.g. '강화 사격:').
     normalized = normalized.rsplit(":", 1)[-1].strip()
     if re.search(r"(?:증가|감소|상향|하향|강화|약화).{0,12}(?:않|아니|못)", normalized):
         return "adjust"
-    if (len(CHANGE_NUMBER_RE.findall(normalized)) > 1
-            or len(re.findall(r"(?:증가|감소)(?!량)", normalized)) > 1):
+    if len(CHANGE_NUMBER_RE.findall(normalized)) > 1:
         # Multiple metrics can have opposite benefits; retain a neutral label.
+        return "adjust"
+    # '사거리 증가가 75%에서 40%로 감소' is one change, not two directions.
+    direction_verbs = re.findall(r"(?:증가|감소)(?:했|하였|하|되었|됩|되)", normalized)
+    if len(direction_verbs) > 1:
         return "adjust"
     direction = _extract_numeric_direction(
         normalized
@@ -1830,6 +1859,26 @@ def classify_change_line(text: str) -> str:
 
     numeric = re.search(r"[-+]?\d", normalized)
     metric = normalized[:numeric.start()] if numeric else normalized
+
+    # Presentation-only changes have no numeric combat benefit. Keep their row
+    # visible, without overriding a hero's otherwise clear buff/nerf category.
+    if re.search(r"시각 효과|음향|효과음|카메라|1인칭.*애니메이션", normalized):
+        if not re.search(r"공격력|피해|치유|재사용 대기|생명력|비용|탄약|재생률", normalized):
+            return "neutral"
+
+    if re.search(r"최대 분산도에 도달하기까지의 탄환 수", metric):
+        return "buff" if direction > 0 else "nerf" if direction < 0 else "adjust"
+
+    # A longer attack animation is a cost; a longer shield/drone/invulnerability
+    # effect is a benefit. Unknown duration contexts remain 'adjust'.
+    if "지속 시간" in metric and not any(key in metric for key in LOWER_IS_BETTER_KEYWORDS):
+        if re.search(r"방벽|보호막|무적|앵커 드론|망령화|파워 매트릭스|시야 이탈", context):
+            return "buff" if direction > 0 else "nerf" if direction < 0 else "adjust"
+
+    # More reduction of a cost is beneficial, unlike increasing the cost itself.
+    cost_reduction = re.search(r"(?:재사용 대기시간|궁극기 (?:충전 )?비용)\s*감소(?:량|율)?(?:이|가)?\s*$", metric)
+    if cost_reduction:
+        return "buff" if direction > 0 else "nerf" if direction < 0 else "adjust"
 
     lower_is_better = any(
         keyword in metric
@@ -1846,6 +1895,9 @@ def classify_change_line(text: str) -> str:
         for keyword in HIGHER_IS_BETTER_KEYWORDS
     )
 
+    # '분산도의 범위' describes spread, not beneficial ability range.
+    if re.search(r"분산도(?:의)? 범위", metric):
+        higher_is_better = False
     if lower_is_better and (higher_is_better or re.search(r"감소(?:량|율| 효과| 비율)", metric)):
         return "adjust"
 
@@ -1886,16 +1938,21 @@ def extract_balance_summary(
     current_ability: str | None = None
     hero_level: int | None = None
     in_hero_section = False
-    heroes: dict[tuple[str, str], list[str]] = {}
+    current_mode: str | None = "일반전"
+    heroes: dict[tuple[str, str, str], list[str]] = {}
 
     for tag_name, raw_text in patch.items:
         text = clean_text(raw_text)
         if not text:
             continue
+        if tag_name == "developer":
+            continue
         level = heading_level(tag_name)
         if level is not None:
             role = _role_from_heading(text)
             if role:
+                if current_mode is None:
+                    continue
                 current_role = role
                 current_hero = current_ability = None
                 hero_level = None
@@ -1904,7 +1961,13 @@ def extract_balance_summary(
             if _is_generic_section(text):
                 current_role = current_hero = current_ability = None
                 hero_level = None
-                in_hero_section = ("영웅" in text or "hero" in text.lower())
+                if "스타디움" in text or "stadium" in text.lower():
+                    current_mode = "스타디움"
+                elif "영웅" in text or "hero" in text.lower():
+                    current_mode = "일반전"
+                else:
+                    current_mode = None
+                in_hero_section = current_mode is not None
                 continue
             if current_hero and hero_level is not None and level > hero_level:
                 current_ability = text
@@ -1916,23 +1979,27 @@ def extract_balance_summary(
                 current_hero = text
                 current_ability = None
                 hero_level = level
-                heroes.setdefault((current_role or "영웅", current_hero), [])
+                heroes.setdefault((current_mode, current_role or "영웅", current_hero), [])
             else:
                 current_hero = current_ability = None
                 hero_level = None
             continue
-        if current_hero and tag_name == "p" and "특전" in text and len(text) <= 50 and not _looks_like_change_line(text):
+        if current_hero and tag_name in {"p", "li"} and len(text) <= 70 and re.search(r"[-–].*(?:특전|파워|아이템)$", text):
             current_ability = text
             continue
-        if current_hero and _looks_like_change_line(text):
+        # Structured hero list items are changes even without words like
+        # increase/decrease (restorations, conditional effects, new mechanics).
+        if current_hero and (_looks_like_change_line(text) or (
+                tag_name == "li" and text not in {"기술 조정", "변경 사항"})):
             line = f"{current_ability}: {text}" if current_ability else text
-            lines = heroes.setdefault((current_role or "영웅", current_hero), [])
+            lines = heroes.setdefault((current_mode, current_role or "영웅", current_hero), [])
             if line not in lines:
                 lines.append(line)
 
     result: list[dict] = []
 
     for (
+        mode,
         role,
         hero,
     ), changes in heroes.items():
@@ -1948,7 +2015,7 @@ def extract_balance_summary(
 
         unique_classes = set(
             classifications
-        )
+        ) - {"neutral"}
 
         if unique_classes == {
             "buff"
@@ -1967,6 +2034,7 @@ def extract_balance_summary(
             {
                 "role": role,
                 "hero": hero,
+                "mode": mode,
                 "changes": changes,
                 "category": category,
             }
@@ -2115,7 +2183,7 @@ def send_summary_cards(
             endpoint = (discord_message_url(webhook_url, message_ids[index])
                         if existing else webhook_base_url(webhook_url) + "?wait=true")
             with path.open("rb") as file_handle:
-                response = (requests.patch if existing else requests.post)(
+                response = discord_request(requests.patch if existing else requests.post,
                     endpoint,
                     data={"payload_json": json.dumps(payload, ensure_ascii=False)},
                     files={"files[0]": (path.name, file_handle, "image/png")},
@@ -2123,7 +2191,7 @@ def send_summary_cards(
                 )
                 if existing and response.status_code == 404:
                     file_handle.seek(0)
-                    response = requests.post(
+                    response = discord_request(requests.post,
                         webhook_base_url(webhook_url) + "?wait=true",
                         data={"payload_json": json.dumps(payload, ensure_ascii=False)},
                         files={"files[0]": (path.name, file_handle, "image/png")},
@@ -2212,7 +2280,7 @@ def format_summary(
                 f"- {text}"
             )
 
-        elif tag_name == "p":
+        elif tag_name in {"p", "developer"}:
             line = text
 
         else:
@@ -2409,6 +2477,36 @@ def decorate_payloads(
 # Discord 전송 / 수정 / 삭제
 # ============================================================
 
+def discord_request(request, url: str, **kwargs):
+    """Retry confirmed rate-limit rejections only, preserving multipart bytes."""
+    streams = [(part[1], part[1].tell()) for part in kwargs.get("files", {}).values()]
+    for attempt in range(5):
+        for stream, position in streams:
+            stream.seek(position)
+        response = request(url, **kwargs)
+        if response.status_code != 429 or attempt == 4:
+            return response
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        candidates = [response.headers.get("Retry-After"),
+                      body.get("retry_after") if isinstance(body, dict) else None]
+        delays = []
+        for candidate in candidates:
+            try:
+                delay = float(candidate)
+            except (ValueError, TypeError):
+                continue
+            if math.isfinite(delay) and delay >= 0:
+                delays.append(delay)
+        delay = max(delays) if delays else 2 ** attempt
+        delay = max(delay, 0.1)
+        response.close()
+        print(f"Discord 요청 제한 → {delay:g}초 대기 후 재시도 ({attempt + 1}/4)")
+        time.sleep(delay)
+
+
 def webhook_base_url(
     webhook_url: str,
 ) -> str:
@@ -2452,7 +2550,7 @@ def edit_discord_message(
     message_id: str,
     payload: dict,
 ) -> None:
-    response = requests.patch(
+    response = discord_request(requests.patch,
         discord_message_url(
             webhook_url,
             message_id,
@@ -2478,7 +2576,7 @@ def delete_discord_message(
     webhook_url: str,
     message_id: str,
 ) -> None:
-    response = requests.delete(
+    response = discord_request(requests.delete,
         discord_message_url(
             webhook_url,
             message_id,
@@ -2511,7 +2609,7 @@ def sync_discord_messages(
             except requests.HTTPError as exc:
                 if exc.response is None or exc.response.status_code != 404:
                     raise
-        response = requests.post(
+        response = discord_request(requests.post,
             webhook_base_url(webhook_url) + "?wait=true",
             json={
                 "username": "오버워치 패치 알림",

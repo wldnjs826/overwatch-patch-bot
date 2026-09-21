@@ -62,7 +62,7 @@ class SummaryTests(unittest.TestCase):
     def test_ambiguous_and_negated_changes_stay_neutral(self):
         for text in ["공격력이 10에서 12로 증가하고 재사용 대기시간이 8초에서 9초로 증가했습니다.",
                      "공격력이 10% 증가하고 재사용 대기시간이 2초 증가했습니다.",
-                     "피해가 20에서 10으로 감소하지 않습니다.", "적에게 보이는 시각 효과가 감소했습니다."]:
+                     "피해가 20에서 10으로 감소하지 않습니다."]:
             with self.subTest(text=text):
                 self.assertEqual(monitor.classify_change_line(text), "adjust")
 
@@ -71,13 +71,77 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(monitor.classify_change_line("방어력이 900에서 1,000으로 증가했습니다."), "buff")
 
     def test_conflicting_metrics_names_negation_and_units_stay_neutral(self):
-        for text in ["재사용 대기시간 감소량이 20%에서 10%로 감소했습니다.",
-                     "재사용 대기시간 동안 이동 속도가 10%에서 20%로 증가했습니다.",
-                     "강화 사격: 시각 효과가 변경되었습니다.", "공격력이 상향되지 않았습니다.",
+        for text in ["재사용 대기시간 동안 이동 속도가 10%에서 20%로 증가했습니다.",
+                     "공격력이 상향되지 않았습니다.",
                      "시전 시간이 1초에서 500밀리초로 감소했습니다."]:
             with self.subTest(text=text):
                 self.assertEqual(monitor.classify_change_line(text), "adjust")
         self.assertEqual(monitor.classify_change_line("소용돌이 질주: 회복 시간이 0.5초에서 0.75초로 증가했습니다."), "nerf")
+
+    def test_explicit_combat_metrics_and_reduction_amounts(self):
+        cases = [
+            ("연료 재생률이 15에서 22.5로 증가했습니다.", "buff"),
+            ("배치 거리가 30미터에서 25미터로 감소했습니다.", "nerf"),
+            ("투사체 크기가 0.17에서 0.07로 감소했습니다.", "nerf"),
+            ("폭발 지연이 1초에서 0.8초로 감소했습니다.", "buff"),
+            ("강화된 펀치의 방사형 피해 사거리 증가가 75%에서 40%로 감소했습니다.", "nerf"),
+            ("최대 분산도의 범위가 1에서 1.5로 증가했습니다.", "nerf"),
+            ("최대 분산도에 도달하기까지의 탄환 수가 0발에서 30발로 증가했습니다.", "buff"),
+            ("하나의 기관포만을 발사할 때의 최대 분산도가 1.5에서 1로 복원되었습니다.", "buff"),
+            ("재사용 대기시간 감소량이 20%에서 10%로 감소했습니다.", "nerf"),
+            ("궁극기 충전 비용 감소가 50%에서 60%로 증가했습니다.", "buff"),
+            ("대상당 재사용 대기시간 감소가 2초에서 2.5초로 증가했습니다.", "buff"),
+            ("적응형 방벽 - 주요 특전: 지속 시간이 1.5초에서 1초로 감소했습니다.", "nerf"),
+            ("팔라틴 팽: 가로 휘두르기 지속 시간이 0.25초에서 0.2초로 감소했습니다.", "buff"),
+            ("팔라틴 팽: 연속 공격 지속 시간이 0.75초에서 0.9초로 증가했습니다.", "nerf"),
+        ]
+        for line, category in cases:
+            with self.subTest(line=line):
+                self.assertEqual(monitor.classify_change_line(line), category)
+
+    def test_cosmetics_do_not_override_combat_direction_or_disappear(self):
+        result = self.summarize([
+            ("h4", "영웅 업데이트"), ("h5", "안란"),
+            ("li", "적에게 보이는 시각 효과가 감소했습니다."),
+            ("h6", "주작 부활"), ("li", "시전 시간이 3초에서 2.5초로 감소했습니다."),
+        ])
+        self.assertEqual(result[0]["category"], "buff")
+        self.assertEqual(len(result[0]["changes"]), 2)
+        self.assertEqual(monitor.classify_change_line(result[0]["changes"][0]), "neutral")
+        self.assertEqual(monitor.classify_change_line("강화 사격: 시각 효과가 변경되었습니다."), "neutral")
+
+    def test_real_july_patch_ignores_developer_prose_and_separates_stadium(self):
+        raw = monitor.parse_nexon_article((Path(__file__).parent / "fixtures/nexon-july15.html").read_text(encoding="utf-8"), "https://overwatch.nexon.com/news/patchnotes/689/patch-2026-07-14")
+        parsed = monitor.assign_patch_ids([raw])[0]
+        result = {(r["mode"], r["hero"]): r for r in monitor.extract_balance_summary(parsed)}
+        for hero, category in {"둠피스트": "nerf", "정커퀸": "buff", "라마트라": "buff", "시그마": "nerf", "캐서디": "nerf", "프레야": "buff", "리퍼": "buff", "벤처": "buff", "아나": "buff", "루시우": "buff", "키리코": "nerf", "시온": "adjust", "마우가": "adjust"}.items():
+            with self.subTest(hero=hero):
+                self.assertEqual(result[("일반전", hero)]["category"], category)
+        self.assertEqual(monitor.classify_change_line(result[("스타디움", "정커퀸")]["changes"][0]), "nerf")
+        self.assertEqual(result[("스타디움", "캐서디")]["category"], "buff")
+        self.assertIn("고귀한 총알 - 파워:", result[("스타디움", "정커퀸")]["changes"][0])
+        comments = [text for tag, text in raw["items"] if tag == "developer"]
+        self.assertGreater(len(comments), 10)
+        original_body = "\n".join(monitor.format_summary(parsed))
+        for comment in comments:
+            self.assertIn(comment, original_body)
+            self.assertFalse(any(comment in change for entry in result.values() for change in entry["changes"]))
+        self.assertEqual(raw["body_hash"], monitor.build_body_hash(raw["title"], [("p" if tag == "developer" else tag, text) for tag, text in raw["items"]]))
+
+    def test_real_september_patch_has_buffs_nerfs_and_mixed_changes(self):
+        raw = monitor.parse_nexon_article((Path(__file__).parent / "fixtures/nexon-sept9.html").read_text(encoding="utf-8"), "https://overwatch.nexon.com/news/patchnotes/820/patch-2026-09-08")
+        parsed = monitor.assign_patch_ids([raw])[0]
+        entries, _ = monitor.prepare_card_data(parsed)
+        core = {e["hero"]: e for e in entries if e["mode"] == "일반전"}
+        expected = {"D.Va": "buff", "도미나": "buff", "안란": "buff", "바티스트": "buff",
+                    "레킹볼": "nerf", "자리야": "nerf", "프레야": "nerf", "시메트라": "nerf", "키리코": "nerf", "젠야타": "nerf",
+                    "정크랫": "adjust", "시에라": "adjust", "토르비욘": "adjust", "벤데타": "adjust", "브리기테": "adjust", "마우가": "adjust", "제트팩 캣": "adjust"}
+        for hero, category in expected.items():
+            with self.subTest(hero=hero):
+                self.assertEqual(core[hero]["category"], category)
+        self.assertEqual({line["category"] for line in core["정크랫"]["changes"]}, {"buff", "nerf"})
+        self.assertTrue(any("복원" in line or "1.5 → 1" in line for line in (c["text"] for c in core["마우가"]["changes"])))
+        self.assertTrue(any("사망 구역" in c["text"] for c in core["제트팩 캣"]["changes"]))
 
 
 if __name__ == "__main__":

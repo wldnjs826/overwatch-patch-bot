@@ -8,7 +8,7 @@ ENDING = r"(?:했습니다|하였습니다|되었습니다|됩니다|합니다|�
 PAIR = re.compile(
     rf"(?P<a>{NUMBER})\s*(?P<au>{UNIT})?\s*에서\s*"
     rf"(?P<b>{NUMBER})\s*(?P<bu>{UNIT})?\s*(?:으)?로\s*"
-    rf"(?:증가|감소|변경|조정|확대|축소)(?P<end>{ENDING})(?=$|\s|[.,;:!?()])"
+    rf"(?:증가|감소|변경|조정|확대|축소|복원)(?P<end>{ENDING})(?=$|\s|[.,;:!?()])"
 )
 DELTA = re.compile(
     rf"(?<![\w.,+\-−])(?P<n>{NUMBER})\s*(?P<u>{UNIT})?\s*(?:만큼\s*)?"
