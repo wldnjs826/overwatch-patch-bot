@@ -34,8 +34,8 @@ STATE_FILE = Path("state.json")
 
 MESSAGE_LIMIT = 1900
 
-# 텍스트 메시지에만 적용됩니다.
-# 이미지는 개수 제한 없이 10장씩 계속 나눠 전송합니다.
+# 텍스트 메시지에만 적용됩니다. 자동 요약 카드는 별도로 전송합니다.
+# 패치 본문에서 수집한 공식 이미지는 Discord에 전송하지 않습니다.
 MAX_TEXT_MESSAGES = int(os.getenv("MAX_TEXT_MESSAGES", "20"))
 
 SEND_ON_FIRST_RUN = os.getenv("SEND_ON_FIRST_RUN", "true").lower() == "true"
@@ -3232,31 +3232,10 @@ def split_text_messages(
     return chunks
 
 
-def chunks_of(
-    values: list[str],
-    size: int,
-) -> list[list[str]]:
-    return [
-        values[index:index + size]
-        for index in range(
-            0,
-            len(values),
-            size,
-        )
-    ]
-
-
 def build_discord_payloads(
     patch: Patch,
 ) -> list[dict]:
-    """
-    텍스트 + 패치 본문 공식 이미지를 전부 Discord에 보냅니다.
-
-    Discord는 한 메시지에 Embed 최대 10개이므로
-    이미지가 23장이면 10 + 10 + 3으로 자동 분할됩니다.
-
-    이미지 개수 자체에는 별도 제한을 두지 않습니다.
-    """
+    """제목·공식 링크·본문만 전송합니다. 자동 요약 카드는 별도 생성합니다."""
     payloads: list[dict] = []
 
     text_lines = format_summary(
@@ -3272,46 +3251,6 @@ def build_discord_payloads(
                 "embeds": [],
             }
         )
-
-    image_groups = chunks_of(
-        patch.images,
-        DISCORD_EMBEDS_PER_MESSAGE,
-    )
-
-    total_images = len(
-        patch.images
-    )
-
-    image_position = 0
-
-    for group in image_groups:
-        first = (
-            image_position + 1
-        )
-
-        last = (
-            image_position
-            + len(group)
-        )
-
-        payloads.append(
-            {
-                "content": (
-                    f"**패치 이미지 "
-                    f"{first}-{last}/{total_images}**"
-                ),
-                "embeds": [
-                    {
-                        "image": {
-                            "url": image_url
-                        }
-                    }
-                    for image_url in group
-                ],
-            }
-        )
-
-        image_position = last
 
     if not payloads:
         payloads.append(
@@ -4009,7 +3948,6 @@ def summary_is_current(record: dict, patch: Patch) -> bool:
     return (
         record.get("summary_card_version", 0) == SUMMARY_CARD_VERSION
         and record.get("summary_body_hash") == patch.body_hash
-        and record.get("summary_image_hash") == patch.image_hash
         and (bool(record.get("summary_message_ids")) or record.get("summary_empty") is True)
     )
 
@@ -4053,10 +3991,8 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
         record = make_record(patch, "sending")
         records[patch.patch_id] = record
 
-    changed = (
-        record.get("body_hash") != patch.body_hash
-        or record.get("image_hash", patch.image_hash) != patch.image_hash
-    )
+    # Source images are metadata only; changing one must not resend text/cards.
+    changed = record.get("body_hash") != patch.body_hash
     # Old code consumed an update without actually delivering it. Recover it once.
     recover_skipped = bool(record.get("last_uneditable_change_utc"))
     text_needed = not was_sent or changed or recover_skipped
@@ -4101,7 +4037,6 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
         record["summary_message_ids"] = summary_ids
         record["summary_card_version"] = SUMMARY_CARD_VERSION
         record["summary_body_hash"] = patch.body_hash
-        record["summary_image_hash"] = patch.image_hash
         record["summary_empty"] = not summary_ids
         save_state(state)
 
@@ -4132,7 +4067,6 @@ def preview_patches(patches: list[Patch], state: dict) -> None:
         elif record.get("status") != "sent":
             action = "신규/미완료 전송 대상"
         elif (record.get("body_hash") != patch.body_hash
-              or record.get("image_hash", patch.image_hash) != patch.image_hash
               or record.get("last_uneditable_change_utc")):
             action = "기존 메시지 수정/ID 없는 수정본 복구 대상"
         elif (record.get("migration") != "fresh_install_baseline"
