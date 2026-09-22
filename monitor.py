@@ -3172,6 +3172,8 @@ def preview_patches(patches: list[Patch], state: dict) -> None:
             action = "다른 소스와 중복"
         elif record.get("status") != "sent":
             action = "신규/미완료 전송 대상"
+        elif not record.get("discord_message_ids"):
+            action = "과거 sent 기록(message_id 없음) → 자동 재전송 차단"
         elif (record.get("body_hash") != patch.body_hash
               or record.get("last_uneditable_change_utc")
               or (record.get("discord_message_ids") and
