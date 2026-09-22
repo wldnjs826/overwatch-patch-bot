@@ -86,13 +86,17 @@ class ManualScopeTests(unittest.TestCase):
         for old in (self.same_day_old, self.older):
             self.assertEqual(monitor.load_state()["patches"][old.patch_id], before[old.patch_id])
 
-    def test_scheduled_run_keeps_processing_full_collection(self):
+    def test_scheduled_run_cannot_unlock_historical_bulk_delivery(self):
         self.seed_state()
+        # Even an explicit false value must not disable the production safety lock.
         with patch.dict(os.environ, {"LATEST_PATCH_ONLY": "false"}):
             self.assertEqual(monitor.main(), 0)
-        self.assertEqual([call.args[0].patch_id for call in self.process.call_args_list], [p.patch_id for p in self.patches])
-        self.assertEqual(self.text.call_count, 2)
-        self.assertEqual(self.cards.call_count, 2)
+        self.assertEqual(
+            [call.args[0].patch_id for call in self.process.call_args_list],
+            [self.latest.patch_id],
+        )
+        self.text.assert_not_called()
+        self.cards.assert_not_called()
 
     def test_fresh_manual_run_preserves_full_history_baseline(self):
         self.assertEqual(monitor.main(), 0)
