@@ -41,7 +41,6 @@ jobs:
           SEND_ON_FIRST_RUN: "true"
           MONTH_LOOKBACK: "4"
           NEXON_MAX_ARTICLES: "20"
-          MAX_TEXT_MESSAGES: "20"
           LATEST_PATCH_ONLY: ${{ github.event_name == 'workflow_dispatch' }}
         run: python monitor.py
 

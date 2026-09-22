@@ -10,9 +10,8 @@ import time
 import tempfile
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
@@ -36,9 +35,9 @@ STATE_FILE = Path("state.json")
 
 MESSAGE_LIMIT = 1900
 
-# 텍스트 메시지에만 적용됩니다. 자동 요약 카드는 별도로 전송합니다.
-# 패치 본문에서 수집한 공식 이미지는 Discord에 전송하지 않습니다.
-MAX_TEXT_MESSAGES = int(os.getenv("MAX_TEXT_MESSAGES", "20"))
+# 메시지 번호를 위한 여유를 두고 분할하며 원문은 끝까지 전송합니다.
+DISCORD_CONTENT_LIMIT = 2000
+TEXT_FORMAT_VERSION = 2
 
 SEND_ON_FIRST_RUN = os.getenv("SEND_ON_FIRST_RUN", "true").lower() == "true"
 
@@ -56,7 +55,7 @@ DISCORD_EMBEDS_PER_MESSAGE = 10
 # 자동 요약 카드 설정
 # ============================================================
 
-SUMMARY_CARD_VERSION = 3
+SUMMARY_CARD_VERSION = 4
 
 # 패치에 영웅 밸런스 변경이 없을 때 만드는 일반 핵심 요약의 최대 항목 수.
 SUMMARY_GENERIC_MAX_ITEMS = 16
@@ -239,6 +238,7 @@ class Patch:
     signature_text: str
     source_url: str
     source_name: str
+    hero_roles: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -1077,9 +1077,12 @@ def parse_nexon_article(
 
         tag_name = node.name
         if tag_name == "div":
-            if "PatchNotesAbilityUpdate-name" not in node.get("class", []):
+            if "PatchNotesAbilityUpdate-name" in node.get("class", []):
+                tag_name = "h6"
+            elif "PatchNotesGeneralUpdate-title" in node.get("class", []):
+                tag_name = "section"
+            else:
                 continue
-            tag_name = "h6"
 
         # A paragraph nested in an li is already represented by that list item.
         if tag_name == "p" and node.find_parent("li") is not None:
@@ -1332,6 +1335,7 @@ def parse_blizzard_page(
                 "p",
                 "li",
                 "img",
+                "div",
             ]
         ):
             if node is title_node:
@@ -1342,6 +1346,17 @@ def parse_blizzard_page(
                 area,
             ):
                 break
+
+            tag_name = node.name
+            if tag_name == "div":
+                if "PatchNotesAbilityUpdate-name" in node.get("class", []):
+                    tag_name = "h6"
+                elif "PatchNotesGeneralUpdate-title" in node.get("class", []):
+                    tag_name = "section"
+                else:
+                    continue
+            if tag_name == "p" and node.find_parent("li") is not None:
+                continue
 
             if node.name == "img":
                 image_url = extract_image_url(
@@ -1356,8 +1371,13 @@ def parse_blizzard_page(
 
                 continue
 
+            text_node = node
+            if node.name == "li" and node.find(["ul", "ol"]) is not None:
+                text_node = BeautifulSoup(str(node), "html.parser")
+                for nested_list in text_node.find_all(["ul", "ol"]):
+                    nested_list.decompose()
             text = clean_text(
-                node.get_text(
+                text_node.get_text(
                     " ",
                     strip=True,
                 )
@@ -1439,7 +1459,7 @@ def parse_blizzard_page(
 
             items.append(
                 (
-                    "developer" if is_developer_note(node) else node.name,
+                    "developer" if is_developer_note(node) else tag_name,
                     text,
                 )
             )
@@ -1568,81 +1588,39 @@ def fetch_blizzard_patches() -> list[Patch]:
 # 두 소스 중복 제거
 # ============================================================
 
-def choose_patches(
-    nexon_patches: list[Patch],
-    blizzard_patches: list[Patch],
-) -> list[Patch]:
-    """
-    중복 방지 정책:
+def source_identity(patch: Patch) -> str:
+    """Exact substantive content; keep numbers, units and conditions for matching."""
+    items = [re.sub(r"\s+", "", text) for tag, text in patch.items
+             if tag in {"p", "li", "developer", "section", "h1", "h2", "h3", "h4", "h5", "h6"}]
+    body = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(body.encode("utf-8")).hexdigest() if items else ""
 
-    1. 넥슨이 정상 동작하면 넥슨을 한국어 패치의 기준 소스로 사용.
-    2. Blizzard 패치는 '넥슨 최신 날짜보다 더 최신 날짜'일 때만 보조 추적.
-    3. 같은 날짜 또는 과거 날짜의 Blizzard 패치는 넥슨과 겹칠 가능성이
-       있으므로 전송 후보에서 제외.
-    4. 넥슨 자체가 실패했을 때만 Blizzard가 단독 소스로 동작.
 
-    이 정책으로 같은 패치가 NEXON + BLIZZARD 두 번 올라가는 것을 막습니다.
-    """
+def inherit_explicit_roles(patches: list[Patch]) -> None:
+    """Reuse only roles explicitly observed in fetched official hero sections."""
+    roles: dict[str, str] = {}
+    for patch in sorted(patches, key=lambda p: (p.date_key, p.same_day_index)):
+        for entry in extract_balance_summary(patch):
+            if entry["role"] in {"돌격", "공격", "지원"}:
+                roles[entry["hero"]] = entry["role"]
+    for patch in patches:
+        patch.hero_roles = dict(roles)
 
-    if not nexon_patches:
-        print(
-            "넥슨 데이터 없음 → Blizzard 단독 보조 모드"
-        )
 
-        return sorted(
-            blizzard_patches,
-            key=lambda patch: (
-                patch.date_key,
-                patch.same_day_index,
-            ),
-        )
-
-    selected: dict[
-        str,
-        Patch,
-    ] = {
-        patch.patch_id: patch
-        for patch in nexon_patches
-    }
-
-    latest_nexon_date = max(
-        patch.date_key
-        for patch in nexon_patches
-    )
-
-    print(
-        f"넥슨 최신 패치 날짜: {latest_nexon_date}"
-    )
-
+def choose_patches(nexon_patches: list[Patch], blizzard_patches: list[Patch]) -> list[Patch]:
+    """Prefer confirmed identical Nexon articles; retain unmatched Blizzard posts."""
+    inherit_explicit_roles(nexon_patches + blizzard_patches)
+    confirmed = {(p.date_key, source_identity(p)) for p in nexon_patches if source_identity(p)}
+    selected = list(nexon_patches)
     for patch in blizzard_patches:
-        # 같은 날짜 및 과거는 전부 NEXON에 맡김.
-        if (
-            patch.date_key
-            <= latest_nexon_date
-        ):
-            print(
-                f"[BLIZZARD 중복/과거 제외] "
-                f"{patch.patch_id} {patch.title}"
-            )
-
+        if (patch.date_key, source_identity(patch)) in confirmed:
+            print(f"[동일 본문 확인 → 넥슨 우선] {patch.patch_id}")
             continue
-
-        selected[
-            patch.patch_id
-        ] = patch
-
-        print(
-            f"[BLIZZARD 최신 보조 채택] "
-            f"{patch.patch_id} {patch.title}"
-        )
-
-    return sorted(
-        selected.values(),
-        key=lambda patch: (
-            patch.date_key,
-            patch.same_day_index,
-        ),
-    )
+        # IDs must stay stable even when Nexon is temporarily unavailable.
+        if not patch.patch_id.endswith("-blizzard"):
+            patch.patch_id += "-blizzard"
+        selected.append(patch)
+    return sorted(selected, key=lambda p: (p.date_key, p.same_day_index))
 
 
 def fetch_recent_patches() -> list[Patch]:
@@ -1782,6 +1760,10 @@ def _looks_like_change_line(value: str) -> bool:
         "변경",
         "수정",
         "시각 효과",
+        "효과음",
+        "음향",
+        "카메라",
+        "업데이트",
     )
 
     return any(
@@ -1805,9 +1787,6 @@ def _extract_numeric_direction(text: str) -> int:
         units = {"m": "미터", "m/s": "미터/초"}
         before_unit = units.get(match.group(2), match.group(2))
         after_unit = units.get(match.group(4), match.group(4))
-        if before_unit and after_unit and before_unit != after_unit:
-            # Do not compare raw magnitudes across units (e.g. 1s -> 500ms).
-            return 0
         before = float(
             match.group(1).replace(",", "")
         )
@@ -1815,6 +1794,15 @@ def _extract_numeric_direction(text: str) -> int:
         after = float(
             match.group(3).replace(",", "")
         )
+
+        if before_unit and after_unit and before_unit != after_unit:
+            time_units = {"초": 1, "밀리초": 0.001}
+            if before_unit in time_units and after_unit in time_units:
+                before *= time_units[before_unit]
+                after *= time_units[after_unit]
+            else:
+                # Percent and percentage points, for example, are not comparable.
+                return 0
 
         if after > before:
             return 1
@@ -1833,26 +1821,48 @@ def _extract_numeric_direction(text: str) -> int:
     return 0
 
 
-def classify_change_line(text: str) -> str:
-    """
-    buff / nerf / adjust
+def _combine_change_classes(classes: set[str]) -> str:
+    """Only known opposing benefits qualify as a mixed adjustment."""
+    if "review" in classes:
+        return "review"
+    combat = classes - {"neutral"}
+    if "adjust" in combat or {"buff", "nerf"} <= combat:
+        return "adjust"
+    if combat == {"buff"}:
+        return "buff"
+    if combat == {"nerf"}:
+        return "nerf"
+    return "neutral" if classes else "review"
 
-    유료 AI 없이 규칙 기반으로 판단합니다.
-    애매한 변화는 무리하게 상향/하향으로 단정하지 않고 '조정'으로 보냅니다.
-    """
+
+def _split_change_clauses(text: str) -> list[str]:
+    # Split only explicit sentence boundaries and change-verb connectives.
+    # Commas within 1,000 and decimal points must remain intact.
+    separated = re.sub(
+        r"((?:증가|감소|변경|조정|상향|하향)(?:했으며|하였으며|되었으며|하며|하고|했고))[,\s]*",
+        r"\1\n", text,
+    )
+    return [part.strip() for part in re.split(r"\n|[;；]\s*|(?<=[.!?])\s+(?=[가-힣A-Za-z])", separated) if part.strip()]
+
+
+def classify_change_line(text: str) -> str:
+    """Classify supported benefits; unknown mechanics are explicitly 'review'."""
     context = clean_text(text).lower()
     normalized = context
     # Ability names are context, not evidence of a buff (e.g. '강화 사격:').
     normalized = normalized.rsplit(":", 1)[-1].strip()
+    clauses = _split_change_clauses(normalized)
+    if len(clauses) > 1:
+        ability = context.rsplit(":", 1)[0] + ": " if ":" in context else ""
+        return _combine_change_classes({classify_change_line(ability + clause) for clause in clauses})
     if re.search(r"(?:증가|감소|상향|하향|강화|약화).{0,12}(?:않|아니|못)", normalized):
-        return "adjust"
+        return "review"
     if len(CHANGE_NUMBER_RE.findall(normalized)) > 1:
-        # Multiple metrics can have opposite benefits; retain a neutral label.
-        return "adjust"
+        return "review"
     # '사거리 증가가 75%에서 40%로 감소' is one change, not two directions.
     direction_verbs = re.findall(r"(?:증가|감소)(?:했|하였|하|되었|됩|되)", normalized)
     if len(direction_verbs) > 1:
-        return "adjust"
+        return "review"
     direction = _extract_numeric_direction(
         normalized
     )
@@ -1867,18 +1877,30 @@ def classify_change_line(text: str) -> str:
             return "neutral"
 
     if re.search(r"최대 분산도에 도달하기까지의 탄환 수", metric):
-        return "buff" if direction > 0 else "nerf" if direction < 0 else "adjust"
+        return "buff" if direction > 0 else "nerf" if direction < 0 else "review"
 
     # A longer attack animation is a cost; a longer shield/drone/invulnerability
-    # effect is a benefit. Unknown duration contexts remain 'adjust'.
+    # effect is a benefit. Unknown duration contexts require review.
     if "지속 시간" in metric and not any(key in metric for key in LOWER_IS_BETTER_KEYWORDS):
         if re.search(r"방벽|보호막|무적|앵커 드론|망령화|파워 매트릭스|시야 이탈", context):
-            return "buff" if direction > 0 else "nerf" if direction < 0 else "adjust"
+            return "buff" if direction > 0 else "nerf" if direction < 0 else "review"
 
     # More reduction of a cost is beneficial, unlike increasing the cost itself.
-    cost_reduction = re.search(r"(?:재사용 대기시간|궁극기 (?:충전 )?비용)\s*감소(?:량|율)?(?:이|가)?\s*$", metric)
+    cost_reduction = re.search(r"(?:재사용 대기\s*시간|쿨다운|궁극기 (?:충전 )?비용)\s*감소(?:량|율| 효과| 비율)?(?:이|가)?\s*$", metric)
     if cost_reduction:
-        return "buff" if direction > 0 else "nerf" if direction < 0 else "adjust"
+        return "buff" if direction > 0 else "nerf" if direction < 0 else "review"
+
+    # Receiving more damage is a disadvantage; reducing incoming damage is a
+    # benefit. Do not confuse it with the amount of damage a hero deals.
+    if re.search(r"(?:받는|입는) 피해", metric):
+        higher_better = bool(re.search(r"감소(?:량|율| 효과| 비율)?(?:이|가)?\s*$", metric))
+        if direction:
+            return "buff" if (direction > 0) == higher_better else "nerf"
+        return "review"
+
+    # More healing reduction is a cost, unlike more healing itself.
+    if re.search(r"치유량\s*감소(?:량|율| 효과| 비율)?(?:이|가)?\s*$", metric):
+        return "nerf" if direction > 0 else "buff" if direction < 0 else "review"
 
     lower_is_better = any(
         keyword in metric
@@ -1899,7 +1921,7 @@ def classify_change_line(text: str) -> str:
     if re.search(r"분산도(?:의)? 범위", metric):
         higher_is_better = False
     if lower_is_better and (higher_is_better or re.search(r"감소(?:량|율| 효과| 비율)", metric)):
-        return "adjust"
+        return "review"
 
     if direction != 0:
         if lower_is_better:
@@ -1923,7 +1945,7 @@ def classify_change_line(text: str) -> str:
     if re.search(r"(?:하향|약화)(?:되었습니다|됩니다|했습니다|합니다|됨|함)(?=$|[\s.!?])", normalized):
         return "nerf"
 
-    return "adjust"
+    return "review"
 
 
 def extract_balance_summary(
@@ -1946,6 +1968,11 @@ def extract_balance_summary(
         if not text:
             continue
         if tag_name == "developer":
+            continue
+        if tag_name == "section":
+            current_role = current_hero = current_ability = None
+            hero_level = None
+            in_hero_section = False
             continue
         level = heading_level(tag_name)
         if level is not None:
@@ -1979,7 +2006,7 @@ def extract_balance_summary(
                 current_hero = text
                 current_ability = None
                 hero_level = level
-                heroes.setdefault((current_mode, current_role or "영웅", current_hero), [])
+                heroes.setdefault((current_mode, current_role or patch.hero_roles.get(current_hero, "영웅"), current_hero), [])
             else:
                 current_hero = current_ability = None
                 hero_level = None
@@ -1992,7 +2019,7 @@ def extract_balance_summary(
         if current_hero and (_looks_like_change_line(text) or (
                 tag_name == "li" and text not in {"기술 조정", "변경 사항"})):
             line = f"{current_ability}: {text}" if current_ability else text
-            lines = heroes.setdefault((current_mode, current_role or "영웅", current_hero), [])
+            lines = heroes.setdefault((current_mode, current_role or patch.hero_roles.get(current_hero, "영웅"), current_hero), [])
             if line not in lines:
                 lines.append(line)
 
@@ -2013,32 +2040,16 @@ def extract_balance_summary(
             for line in changes
         ]
 
-        unique_classes = set(
-            classifications
-        ) - {"neutral"}
+        known = [line for line, category in zip(changes, classifications) if category != "review"]
+        unknown = [line for line, category in zip(changes, classifications) if category == "review"]
+        if known:
+            category = _combine_change_classes(set(classifications) - {"review"})
+            result.append({"role": role, "hero": hero, "mode": mode,
+                           "changes": known, "category": category})
+        if unknown:
+            result.append({"role": role, "hero": hero, "mode": mode,
+                           "changes": unknown, "category": "review"})
 
-        if unique_classes == {
-            "buff"
-        }:
-            category = "buff"
-
-        elif unique_classes == {
-            "nerf"
-        }:
-            category = "nerf"
-
-        else:
-            category = "adjust"
-
-        result.append(
-            {
-                "role": role,
-                "hero": hero,
-                "mode": mode,
-                "changes": changes,
-                "category": category,
-            }
-        )
 
     return result
 
@@ -2137,16 +2148,29 @@ def prepare_card_data(patch: Patch) -> tuple[list[dict], list[dict]]:
     entries = []
     for entry in extract_balance_summary(patch):
         changes = [
-            {**compact_change(line), "category": classify_change_line(line)}
+            ({**compact_change(line), "category": classify_change_line(line)}
+             if entry["category"] != "review" else
+             {"text": line, "highlights": [], "category": "review"})
             for line in entry["changes"]
         ]
         entries.append({**entry, "changes": changes})
     general = []
     if not entries:
-        general = [
-            {**compact_change(line), "category": "general"}
-            for line in extract_generic_summary(patch)
-        ]
+        grouped: dict[str, list[tuple[str, str]]] = {}
+        mode = "일반전"
+        for tag, text in patch.items:
+            if heading_level(tag) is not None or tag == "section":
+                if "스타디움" in text or "stadium" in text.lower():
+                    mode = "스타디움"
+                elif text in {"일반 업데이트", "영웅 업데이트", "일반", "버그 수정"}:
+                    mode = "일반전"
+            grouped.setdefault(mode, []).append((tag, text))
+        for mode, items in grouped.items():
+            changes = [{**compact_change(line), "category": "general"}
+                       for line in extract_generic_summary(replace(patch, items=items))]
+            if changes:
+                entries.append({"mode": mode, "role": "일반", "hero": "주요 변경",
+                                "category": "general", "changes": changes})
     return entries, general
 
 
@@ -2169,7 +2193,7 @@ def send_summary_cards(
     old_message_ids: list[str] | None = None,
     on_progress: Callable[[list[str]], None] | None = None,
 ) -> list[str]:
-    """Update cards in place and checkpoint each acknowledged upload."""
+    """Update cards in order, rebuilding a missing suffix with checkpoints."""
     message_ids = list(old_message_ids or [])
     with tempfile.TemporaryDirectory(prefix="ow-summary-") as temp_dir:
         paths = generate_summary_cards(patch, Path(temp_dir))
@@ -2190,6 +2214,16 @@ def send_summary_cards(
                     timeout=60,
                 )
                 if existing and response.status_code == 404:
+                    # A replacement is appended to the channel. Remove the
+                    # remaining suffix first so later old cards cannot precede
+                    # it. Keep the missing ID until last: interrupted deletion
+                    # will encounter the same 404 and resume this cleanup.
+                    while len(message_ids) > index:
+                        delete_discord_message(webhook_url, message_ids[-1])
+                        message_ids.pop()
+                        if on_progress:
+                            on_progress(message_ids.copy())
+                    existing = False
                     file_handle.seek(0)
                     response = discord_request(requests.post,
                         webhook_base_url(webhook_url) + "?wait=true",
@@ -2256,6 +2290,7 @@ def format_summary(
         previous = text
 
         if tag_name in {
+            "section",
             "h1",
             "h2",
             "h3",
@@ -2297,86 +2332,18 @@ def format_summary(
     return lines
 
 
-def split_text_messages(
-    lines: list[str],
-) -> list[str]:
-    chunks: list[str] = []
-    current = ""
-
-    for line in lines:
-        remaining = line
-
-        while (
-            len(remaining)
-            > MESSAGE_LIMIT
-        ):
-            piece = remaining[
-                :MESSAGE_LIMIT
-            ]
-
-            if current:
-                chunks.append(
-                    current
-                )
-                current = ""
-
-            chunks.append(
-                piece
-            )
-
-            remaining = remaining[
-                MESSAGE_LIMIT:
-            ]
-
-        candidate = (
-            f"{current}\n{remaining}".strip()
-            if current
-            else remaining
-        )
-
-        if (
-            len(candidate)
-            <= MESSAGE_LIMIT
-        ):
-            current = candidate
-
-            continue
-
-        if current:
-            chunks.append(
-                current
-            )
-
-        current = remaining
-
-    if current:
-        chunks.append(
-            current
-        )
-
-    if (
-        len(chunks)
-        > MAX_TEXT_MESSAGES
-    ):
-        chunks = chunks[
-            :MAX_TEXT_MESSAGES
-        ]
-
-        suffix = (
-            "\n\n※ 본문이 매우 길어 일부 텍스트만 표시했습니다. "
-            "전체 내용은 공식 링크에서 확인하세요."
-        )
-
-        chunks[-1] = (
-            chunks[-1][
-                :(
-                    MESSAGE_LIMIT
-                    - len(suffix)
-                )
-            ]
-            + suffix
-        )
-
+def split_text_messages(lines: list[str]) -> list[str]:
+    """Split without a message-count cap or removing any original characters."""
+    remaining = "\n".join(lines)
+    chunks = []
+    while remaining:
+        boundary = min(len(remaining), MESSAGE_LIMIT)
+        if boundary < len(remaining):
+            newline = remaining.rfind("\n", 0, boundary)
+            if newline >= 0:
+                boundary = newline + 1
+        chunks.append(remaining[:boundary])
+        remaining = remaining[boundary:]
     return chunks
 
 
@@ -2414,62 +2381,18 @@ def build_discord_payloads(
     return payloads
 
 
-def decorate_payloads(
-    payloads: list[dict],
-) -> list[dict]:
-    total = len(
-        payloads
-    )
-
-    decorated: list[dict] = []
-
-    for index, payload in enumerate(
-        payloads,
-        start=1,
-    ):
-        content = str(
-            payload.get(
-                "content",
-                "",
-            )
-        )
-
-        embeds = list(
-            payload.get(
-                "embeds",
-                [],
-            )
-        )
-
-        if total > 1:
-            prefix = (
-                f"**[{index}/{total}]**\n"
-            )
-
-            content = (
-                prefix
-                + content[
-                    :(
-                        MESSAGE_LIMIT
-                        - len(prefix)
-                    )
-                ]
-            )
-
-        else:
-            content = content[
-                :MESSAGE_LIMIT
-            ]
-
-        decorated.append(
-            {
-                "content": content,
-                "embeds": embeds[
-                    :DISCORD_EMBEDS_PER_MESSAGE
-                ],
-            }
-        )
-
+def decorate_payloads(payloads: list[dict]) -> list[dict]:
+    total = len(payloads)
+    decorated = []
+    for index, payload in enumerate(payloads, start=1):
+        prefix = f"**[{index}/{total}]**\n" if total > 1 else ""
+        content = prefix + str(payload.get("content", ""))
+        if len(content) > DISCORD_CONTENT_LIMIT:
+            raise ValueError("Discord content exceeds limit; split it before numbering")
+        decorated.append({
+            "content": content,
+            "embeds": list(payload.get("embeds", []))[:DISCORD_EMBEDS_PER_MESSAGE],
+        })
     return decorated
 
 
@@ -2609,6 +2532,15 @@ def sync_discord_messages(
             except requests.HTTPError as exc:
                 if exc.response is None or exc.response.status_code != 404:
                     raise
+                # Preserve chronological text order if a middle message was
+                # deleted. Reverse cleanup leaves the known-missing ID in
+                # place until every later message is acknowledged deleted.
+                while len(message_ids) > index:
+                    delete_discord_message(webhook_url, message_ids[-1])
+                    message_ids.pop()
+                    if on_progress:
+                        on_progress(message_ids.copy())
+                existing = False
         response = discord_request(requests.post,
             webhook_base_url(webhook_url) + "?wait=true",
             json={
@@ -2737,6 +2669,7 @@ def make_record(
             patch.images
         ),
         "signature_text": patch.signature_text,
+        "source_identity": source_identity(patch),
         "source_url": patch.source_url,
         "source_name": patch.source_name,
         "first_seen_source": patch.source_name,
@@ -2985,6 +2918,8 @@ def update_seen_record(
             patch.images
         )
 
+    if update_hashes or record.get("body_hash") == patch.body_hash:
+        record["source_identity"] = source_identity(patch)
     record[
         "signature_text"
     ] = patch.signature_text
@@ -3034,87 +2969,18 @@ def date_distance_days(
         return 999
 
 
-def find_cross_source_duplicate(
-    patch: Patch,
-    records: dict,
-) -> tuple[str, dict] | None:
-    """
-    넥슨 장애 중 Blizzard로 먼저 전송된 뒤,
-    넥슨이 하루 차이 날짜로 같은 한국어 내용을 올리는 예외 상황을 방지합니다.
-
-    - 서로 다른 소스
-    - 날짜 차이 0~1일
-    - 본문 구조/내용 유사도 매우 높음
-
-    조건에서만 중복으로 판단합니다.
-    """
-    if not patch.signature_text:
+def find_cross_source_duplicate(patch: Patch, records: dict) -> tuple[str, dict] | None:
+    # Never use the old number-stripped fuzzy signature to equate different patches.
+    identity = source_identity(patch)
+    if not identity:
         return None
-
     for other_id, record in records.items():
-        if not isinstance(
-            record,
-            dict,
-        ):
-            continue
-
-        if record.get(
-            "status"
-        ) != "sent":
-            continue
-
-        other_source = str(
-            record.get(
-                "source_name",
-                "",
-            )
-        )
-
-        if (
-            not other_source
-            or other_source
-            == patch.source_name
-        ):
-            continue
-
-        other_date = str(
-            record.get(
-                "date_key",
-                "",
-            )
-        )
-
-        if (
-            date_distance_days(
-                patch.date_key,
-                other_date,
-            )
-            > 1
-        ):
-            continue
-
-        other_signature = str(
-            record.get(
-                "signature_text",
-                "",
-            )
-        )
-
-        if not other_signature:
-            continue
-
-        similarity = SequenceMatcher(
-            None,
-            patch.signature_text,
-            other_signature,
-        ).ratio()
-
-        if similarity >= 0.94:
-            return (
-                other_id,
-                record,
-            )
-
+        if (isinstance(record, dict) and record.get("status") == "sent"
+                and record.get("source_name") != patch.source_name
+                and record.get("date_key") == patch.date_key
+                and (record.get("source_identity") == identity
+                     or record.get("body_hash") == patch.body_hash)):
+            return other_id, record
     return None
 
 
@@ -3133,6 +2999,36 @@ def summary_is_current(record: dict, patch: Patch) -> bool:
 def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
     records = state.setdefault("patches", {})
     record = records.get(patch.patch_id)
+    identity = source_identity(patch)
+    if record is None and patch.source_name == "blizzard":
+        legacy_id = patch.patch_id.removesuffix("-blizzard")
+        legacy = records.get(legacy_id, {})
+        if (legacy_id != patch.patch_id and legacy.get("source_name") == "blizzard"
+                and (legacy.get("source_identity") == identity
+                     or legacy.get("body_hash") == patch.body_hash)):
+            record = {**legacy, "patch_id": patch.patch_id}
+            records[patch.patch_id] = record
+            records[legacy_id] = {**legacy, "status": "duplicate_source",
+                                  "duplicate_of": patch.patch_id}
+    if record and record.get("status") == "duplicate_source":
+        target = records.get(record.get("duplicate_of"), {})
+        confirmed_nexon = (target.get("status") == "sent"
+                           and target.get("source_name") == "nexon"
+                           and target.get("date_key") == patch.date_key
+                           and target.get("source_identity") == identity)
+        if not (confirmed_nexon and patch.source_name == "blizzard"):
+            # Re-evaluate old fuzzy duplicate decisions; they could hide changed values.
+            record = None
+    if (record and record.get("status") != "duplicate_source"
+            and record.get("source_name") != patch.source_name
+            and record.get("source_identity") != identity
+            and record.get("body_hash") != patch.body_hash):
+        # A legacy date-only key must not let a different source overwrite a patch.
+        preserved_id = patch.patch_id + "-" + str(record.get("source_name", "legacy"))
+        if preserved_id in records:
+            preserved_id += "-" + str(record.get("body_hash", "unknown"))[:12]
+        records[preserved_id] = {**record, "patch_id": preserved_id}
+        record = None
     language = check_korean_patch(patch.items)
     print(f"\n[{patch.source_name.upper()} / {patch.patch_id}] {patch.title}")
     print(f"언어 판별: {language.reason} ({describe_language(language)})")
@@ -3140,12 +3036,20 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
     if record is None:
         duplicate = find_cross_source_duplicate(patch, records)
         if duplicate is not None:
-            original_id, _ = duplicate
-            record = make_record(patch, "duplicate_source")
-            record["duplicate_of"] = original_id
-            records[patch.patch_id] = record
-            print(f"다른 공식 소스에서 전송한 패치 → 중복 제외 ({original_id})")
-            return "duplicate_source"
+            original_id, original = duplicate
+            if patch.source_name == "nexon":
+                # Transfer the confirmed same patch's message IDs, then edit its link.
+                record = {**original, "patch_id": patch.patch_id,
+                          "date_key": patch.date_key, "same_day_index": patch.same_day_index}
+                records[patch.patch_id] = record
+                records[original_id] = {**original, "status": "duplicate_source",
+                                       "duplicate_of": patch.patch_id}
+            else:
+                record = make_record(patch, "duplicate_source")
+                record["duplicate_of"] = original_id
+                records[patch.patch_id] = record
+                print(f"다른 공식 소스에서 전송한 패치 → 중복 제외 ({original_id})")
+                return "duplicate_source"
 
     if record and record.get("status") == "duplicate_source":
         update_seen_record(record, patch)
@@ -3173,7 +3077,10 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
     changed = record.get("body_hash") != patch.body_hash
     # Old code consumed an update without actually delivering it. Recover it once.
     recover_skipped = bool(record.get("last_uneditable_change_utc"))
-    text_needed = not was_sent or changed or recover_skipped
+    repair_original = bool(record.get("discord_message_ids")) and (
+        record.get("text_format_version", 0) < TEXT_FORMAT_VERSION)
+    source_changed = record.get("source_url") != patch.source_url
+    text_needed = not was_sent or changed or recover_skipped or repair_original or source_changed
     # A fresh installation deliberately baselines old posts; do not backfill those.
     fresh_baseline = record.get("migration") == "fresh_install_baseline"
     cards_needed = not summary_is_current(record, patch) and not (fresh_baseline and not text_needed)
@@ -3188,6 +3095,17 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
         record["status"] = "sending"
         # An interrupted edit must resume even if the source reverts to the old hash.
         save_state(state)
+        # New text chunks/404 replacements appear at the end of the channel.
+        # Rebuild the card block afterwards so all original text precedes all cards.
+        old_cards = list(record.get("summary_message_ids", []))
+        if old_cards:
+            record["summary_card_version"] = 0
+            save_state(state)
+            while old_cards:
+                delete_discord_message(webhook_url, old_cards[0])
+                old_cards.pop(0)
+                checkpoint("summary_message_ids", list(old_cards))
+            cards_needed = True
         message_ids = sync_discord_messages(
             webhook_url,
             record.get("discord_message_ids", []),
@@ -3195,6 +3113,7 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
             lambda ids: checkpoint("discord_message_ids", ids),
         )
         record["discord_message_ids"] = message_ids
+        record["text_format_version"] = TEXT_FORMAT_VERSION
         update_seen_record(record, patch)
         record["status"] = "sent"
         record.setdefault("sent_at_utc", datetime.now(timezone.utc).isoformat())
@@ -3245,7 +3164,10 @@ def preview_patches(patches: list[Patch], state: dict) -> None:
         elif record.get("status") != "sent":
             action = "신규/미완료 전송 대상"
         elif (record.get("body_hash") != patch.body_hash
-              or record.get("last_uneditable_change_utc")):
+              or record.get("last_uneditable_change_utc")
+              or (record.get("discord_message_ids") and
+                  record.get("text_format_version", 0) < TEXT_FORMAT_VERSION)
+              or record.get("source_url") != patch.source_url):
             action = "기존 메시지 수정/ID 없는 수정본 복구 대상"
         elif (record.get("migration") != "fresh_install_baseline"
               and not summary_is_current(record, patch)):

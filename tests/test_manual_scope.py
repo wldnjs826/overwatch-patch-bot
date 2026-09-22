@@ -26,6 +26,7 @@ class ManualScopeTests(unittest.TestCase):
         self.stack.enter_context(patch.object(requests.sessions.Session, "request", side_effect=AssertionError("Unexpected network call")))
         self.text = self.stack.enter_context(patch.object(monitor, "sync_discord_messages", return_value=["text-new"]))
         self.cards = self.stack.enter_context(patch.object(monitor, "refresh_summary_cards", return_value=["card-new"]))
+        self.delete = self.stack.enter_context(patch.object(monitor, "delete_discord_message"))
         self.process = self.stack.enter_context(patch.object(monitor, "process_patch", wraps=monitor.process_patch))
         raws = []
         for date, title in [("2026-09-18", "최신"), ("2026-09-18", "같은 날 이전"), ("2026-09-11", "과거")]:
@@ -44,7 +45,8 @@ class ManualScopeTests(unittest.TestCase):
             if item is self.latest and not include_latest:
                 continue
             record = monitor.make_record(item, "sent")
-            record.update({"discord_message_ids": ["text-" + item.patch_id],
+            record.update({"text_format_version": monitor.TEXT_FORMAT_VERSION,
+                           "discord_message_ids": ["text-" + item.patch_id],
                            "summary_message_ids": ["card-" + item.patch_id]})
             if item is self.latest:
                 record.update({"summary_card_version": monitor.SUMMARY_CARD_VERSION,
@@ -67,6 +69,7 @@ class ManualScopeTests(unittest.TestCase):
         self.assertEqual([call.args[0].patch_id for call in self.process.call_args_list], [self.latest.patch_id])
         self.text.assert_not_called()
         self.cards.assert_not_called()
+        self.delete.assert_not_called()
         after = monitor.load_state()["patches"]
         for old in (self.same_day_old, self.older):
             self.assertEqual(after[old.patch_id], before[old.patch_id])

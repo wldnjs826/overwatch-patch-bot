@@ -1,20 +1,32 @@
-"""Measured, paginated summary cards built entirely from patch text."""
-from collections import OrderedDict
+"""Large, measured cards with one mode, change type and role per page."""
+from collections import Counter, defaultdict
 from pathlib import Path
+import re
 
 from PIL import Image, ImageDraw, ImageFont
 
 
 WIDTH, MAX_HEIGHT = 1050, 1400
-MARGIN, TOP, FOOTER = 38, 162, 74
-ROLE_WIDTH, HERO_WIDTH = 100, 164
-TEXT_X = MARGIN + ROLE_WIDTH + HERO_WIDTH + 45
-TEXT_WIDTH = WIDTH - MARGIN - TEXT_X - 24
-LINE_HEIGHT, PAD = 38, 18
-COLORS = {"buff": "#55C9AD", "nerf": "#F06A91", "adjust": "#F79442", "general": "#5DB6D2", "neutral": "#B7C6CD"}
-LABELS = {"buff": "상향", "nerf": "하향", "adjust": "조정", "general": "핵심 요약"}
-ARROWS = {"buff": "↑", "nerf": "↓", "adjust": "↔", "general": "•", "neutral": "•"}
+MARGIN, TOP, FOOTER = 38, 264, 76
+PAD, HERO_LINE_HEIGHT, HERO_BODY_GAP = 28, 54, 16
+LINE_HEIGHT, CHANGE_GAP, HERO_GAP = 52, 12, 22
+ARROW_WIDTH = 42
+TEXT_X = MARGIN + PAD + ARROW_WIDTH
+TEXT_WIDTH = WIDTH - MARGIN - PAD - TEXT_X
+HERO_WIDTH = WIDTH - 2 * (MARGIN + PAD)
+FONT_SIZES = {"body": 36, "hero": 38, "role": 40, "title": 64, "meta": 25}
+COLORS = {
+    "buff": "#55C9AD", "nerf": "#F06A91", "adjust": "#F79442",
+    "review": "#F2D477", "general": "#5DB6D2", "neutral": "#B7C6CD",
+}
+LABELS = {
+    "buff": "상향", "nerf": "하향", "adjust": "조정",
+    "review": "판별 필요", "general": "핵심 요약", "neutral": "기타 변경",
+}
+ARROWS = {"buff": "↑", "nerf": "↓", "adjust": "↔", "review": "?", "general": "•", "neutral": "•"}
 ROLE_ORDER = {"돌격": 0, "공격": 1, "지원": 2, "영웅": 3, "일반": 4}
+MODE_ORDER = {"일반전": 0, "스타디움": 1}
+CATEGORY_ORDER = {"buff": 0, "nerf": 1, "adjust": 2, "review": 3, "neutral": 4, "general": 5}
 
 
 def wrap_styled(text, spans, font, width):
@@ -52,84 +64,120 @@ def wrap_styled(text, spans, font, width):
 
 def _fonts(font_path):
     return {
-        "body": ImageFont.truetype(font_path(False), 27),
-        "hero": ImageFont.truetype(font_path(True), 25),
-        "role": ImageFont.truetype(font_path(True), 24),
-        "title": ImageFont.truetype(font_path(True), 54),
-        "meta": ImageFont.truetype(font_path(False), 21),
+        name: ImageFont.truetype(font_path(name in {"hero", "role", "title"}), size)
+        for name, size in FONT_SIZES.items()
     }
 
 
+def _group_key(entry):
+    category = entry["category"]
+    if category not in CATEGORY_ORDER:
+        raise ValueError(f"Unknown card category: {category}")
+    return entry.get("mode", "일반전"), category, entry.get("role", "영웅")
+
+
+def _group_order(key):
+    mode, category, role = key
+    # Unclassified material is an explicit appendix after BOTH game modes.
+    appendix = 0 if category in {"buff", "nerf", "adjust"} else CATEGORY_ORDER[category] - 2
+    return (appendix, MODE_ORDER.get(mode, 2), CATEGORY_ORDER[category],
+            ROLE_ORDER.get(role, 5), mode, role)
+
+
+def _role_label(role):
+    if role in {"돌격", "공격", "지원"}:
+        return role
+    return "일반 변경" if role == "일반" else "역할 확인 필요"
+
+
 def plan_cards(entries, general_changes, font_path):
-    """Return explicit layout geometry; no rendering or network operations."""
+    """Lay out full-width hero panels, with immutable fonts and strict groups."""
     fonts = _fonts(font_path)
-    grouped = OrderedDict((key, []) for key in ("buff", "nerf", "adjust"))
-    for entry in entries:
-        grouped[entry["category"]].append(entry)
+    groups = defaultdict(list)
+    for entry_index, entry in enumerate(entries):
+        groups[_group_key(entry)].append((entry_index, entry))
     if not entries and general_changes:
-        grouped["general"] = [{"role": "일반", "hero": "주요 변경", "category": "general", "changes": general_changes}]
+        groups[("일반전", "general", "일반")].append((0, {
+            "hero": "주요 변경", "changes": general_changes,
+        }))
     pages = []
-    for category, group in grouped.items():
-        if not group:
-            continue
-        page = {"category": category, "rows": []}
+    for key in sorted(groups, key=_group_order):
+        mode, category, role = key
+        page = {"mode": mode, "category": category, "role": role, "rows": []}
         cursor = TOP
 
         def finish():
             nonlocal page, cursor
             if page["rows"]:
-                page["height"] = max(380, int(cursor + FOOTER))
+                page["height"] = int(cursor + FOOTER)
                 pages.append(page)
-            page = {"category": category, "rows": []}
+            page = {"mode": mode, "category": category, "role": role, "rows": []}
             cursor = TOP
 
-        for entry_index, entry in enumerate(sorted(group, key=lambda e: ROLE_ORDER.get(e["role"], 5))):
+        for entry_index, entry in groups[key]:
             lines = []
+            change_heights = {}
             for change_index, change in enumerate(entry["changes"]):
                 wrapped = wrap_styled(change["text"], change.get("highlights", []), fonts["body"], TEXT_WIDTH)
+                change_heights[change_index] = len(wrapped) * LINE_HEIGHT
                 for line_index, line in enumerate(wrapped):
-                    lines.append({**line, "category": change["category"], "first": line_index == 0,
-                                  "change_index": change_index, "entry_index": entry_index})
+                    lines.append({**line, "category": change.get("category", category),
+                                  "first": line_index == 0, "change_index": change_index,
+                                  "entry_index": entry_index})
+            continuation_badge = wrap_styled(entry["hero"] + " · 계속", [], fonts["hero"], HERO_WIDTH)
+            continuation_base = 2 * PAD + len(continuation_badge) * HERO_LINE_HEIGHT + HERO_BODY_GAP
             offset = 0
             while offset < len(lines):
-                separated = bool(page["rows"] and page["rows"][-1]["role"] != entry["role"])
-                gap = 14 if separated else 0
+                gap = HERO_GAP if page["rows"] else 0
                 label = entry["hero"] + (" · 계속" if offset else "")
-                badge = wrap_styled(label, [], fonts["hero"], HERO_WIDTH - 18)
-                if entry.get("mode") == "스타디움":
-                    badge.extend(wrap_styled("스타디움", [], fonts["hero"], HERO_WIDTH - 18))
-                minimum = max(116, len(badge) * 30 + 2 * PAD)
+                badge = wrap_styled(label, [], fonts["hero"], HERO_WIDTH)
+                heading_height = len(badge) * HERO_LINE_HEIGHT + HERO_BODY_GAP
+                base_height = 2 * PAD + heading_height
                 available = MAX_HEIGHT - FOOTER - cursor - gap
-                if available < minimum:
+                if available < base_height + LINE_HEIGHT:
+                    if not page["rows"]:
+                        raise ValueError("Hero name leaves no room for a patch line")
                     finish()
                     continue
-                take = min(len(lines) - offset, int((available - 2 * PAD) // LINE_HEIGHT))
-                height = max(minimum, take * LINE_HEIGHT + 2 * PAD)
-                row = {"role": entry["role"], "hero": entry["hero"], "badge": badge,
-                       "mode": entry.get("mode", "일반전"),
-                       "continued": offset > 0, "top": cursor + gap, "height": height,
-                       "lines": lines[offset:offset + take]}
+                selected, used_height = [], base_height
+                for line in lines[offset:]:
+                    before = CHANGE_GAP if selected and line["first"] else 0
+                    if line["first"]:
+                        change_height = change_heights[line["change_index"]]
+                        fresh_base = continuation_base if offset + len(selected) else base_height
+                        fresh_capacity = MAX_HEIGHT - FOOTER - TOP - fresh_base
+                        if (used_height + before + change_height > available
+                                and change_height <= fresh_capacity):
+                            # Keep a change's label, values and conditions together
+                            # whenever the entire change fits on a fresh page.
+                            break
+                    if used_height + before + LINE_HEIGHT > available:
+                        break
+                    selected.append({**line, "gap_before": before})
+                    used_height += before + LINE_HEIGHT
+                if not selected:
+                    if not page["rows"]:
+                        raise ValueError("Card page cannot fit the next patch line")
+                    finish()
+                    continue
+                top = cursor + gap
+                row = {"mode": mode, "category": category, "role": role,
+                       "hero": entry["hero"], "badge": badge, "continued": offset > 0,
+                       "top": top, "height": used_height,
+                       "body_top": top + PAD + heading_height, "lines": selected}
                 page["rows"].append(row)
-                cursor += gap + height
-                offset += take
+                cursor = top + used_height
+                offset += len(selected)
                 if offset < len(lines):
                     finish()
         finish()
+    totals = Counter((page["mode"], page["category"], page["role"]) for page in pages)
+    seen = Counter()
+    for page in pages:
+        key = (page["mode"], page["category"], page["role"])
+        seen[key] += 1
+        page["number"], page["count"] = seen[key], totals[key]
     return pages
-
-
-def _role_icon(draw, role, cx, cy, color):
-    draw.ellipse((cx - 24, cy - 24, cx + 24, cy + 24), outline=color, width=2)
-    if role == "돌격":
-        draw.polygon([(cx - 11, cy - 12), (cx + 11, cy - 12), (cx + 10, cy + 4), (cx, cy + 15), (cx - 10, cy + 4)], fill=color)
-    elif role == "지원":
-        draw.rectangle((cx - 5, cy - 15, cx + 5, cy + 15), fill=color)
-        draw.rectangle((cx - 15, cy - 5, cx + 15, cy + 5), fill=color)
-    elif role == "공격":
-        for dx in (-10, 0, 10):
-            draw.rounded_rectangle((cx + dx - 3, cy - 14, cx + dx + 3, cy + 13), radius=3, fill=color)
-    else:
-        draw.polygon([(cx, cy - 13), (cx + 13, cy), (cx, cy + 13), (cx - 13, cy)], outline=color, width=2)
 
 
 def _draw_page(page, date_key, number, count, fonts):
@@ -137,52 +185,46 @@ def _draw_page(page, date_key, number, count, fonts):
     canvas = Image.new("RGB", (WIDTH, height), "#F3F7F7")
     draw = ImageDraw.Draw(canvas)
     accent = COLORS[page["category"]]
-    # Quiet geometric background, built in code instead of downloading images.
-    for y in range(130, height, 105):
-        for x in range(-50, WIDTH + 60, 120):
-            draw.line([(x, y + 30), (x + 30, y), (x + 70, y), (x + 100, y + 30)], fill="#E5ECEC", width=1)
-    draw.rectangle((0, 0, WIDTH, 9), fill=accent)
-    draw.rounded_rectangle((MARGIN, 53, MARGIN + 70, 123), radius=16, fill=accent)
-    draw.text((MARGIN + 35, 88), ARROWS[page["category"]], font=fonts["title"], fill="#172326", anchor="mm")
-    draw.text((MARGIN + 91, 50), LABELS[page["category"]], font=fonts["title"], fill="#142226")
-    meta = f"{date_key}  ·  오버워치 패치"
-    if count > 1:
-        meta += f"  ·  {number}/{count}"
-    draw.text((WIDTH - MARGIN, 110), meta, font=fonts["meta"], fill="#53636B", anchor="rs")
+    draw.rectangle((0, 0, WIDTH, 10), fill=accent)
+    mode_label = "일반 모드" if page["mode"] == "일반전" else page["mode"]
+    draw.text((MARGIN, 34), mode_label, font=fonts["meta"], fill="#405760", anchor="lt")
+    draw.text((WIDTH - MARGIN, 34), str(date_key), font=fonts["meta"], fill="#53636B", anchor="rt")
+    draw.rounded_rectangle((MARGIN, 85, MARGIN + 76, 161), radius=16, fill=accent)
+    draw.text((MARGIN + 38, 122), ARROWS[page["category"]], font=fonts["title"], fill="#172326", anchor="mm")
+    draw.text((MARGIN + 100, 85), LABELS[page["category"]], font=fonts["title"], fill="#142226", anchor="lt")
+    draw.text((MARGIN, 189), _role_label(page["role"]), font=fonts["role"], fill="#263F48", anchor="lt")
+    draw.text((WIDTH - MARGIN, 199), f"{number} / {count}", font=fonts["meta"], fill="#53636B", anchor="rt")
 
-    groups = []
     for row in page["rows"]:
-        if groups and groups[-1][0]["role"] == row["role"]:
-            groups[-1].append(row)
-        else:
-            groups.append([row])
-    for group in groups:
-        top = group[0]["top"]
-        bottom = group[-1]["top"] + group[-1]["height"]
-        draw.rounded_rectangle((MARGIN, top, WIDTH - MARGIN, bottom), radius=13, fill="#2C3C45")
-        cx, cy = MARGIN + ROLE_WIDTH / 2, (top + bottom) / 2 - 14
-        _role_icon(draw, group[0]["role"], cx, cy, "#E4F1F2")
-        draw.text((cx, cy + 31), group[0]["role"], font=fonts["role"], fill="#E4F1F2", anchor="mt")
-        for row_index, row in enumerate(group):
-            y = row["top"] + PAD
-            badge_x = MARGIN + ROLE_WIDTH + 10
-            badge_height = len(row["badge"]) * 30 + 10
-            draw.rounded_rectangle((badge_x, y, badge_x + HERO_WIDTH, y + badge_height), radius=4, fill=accent)
-            for index, line in enumerate(row["badge"]):
-                draw.text((badge_x + HERO_WIDTH / 2, y + 5 + index * 30), line["text"], font=fonts["hero"], fill="#15282D", anchor="mt")
-            for index, line in enumerate(row["lines"]):
-                color = COLORS.get(line["category"], COLORS["adjust"])
-                if line["first"] or index == 0:
-                    draw.text((TEXT_X - 27, y), ARROWS.get(line["category"], "↔"), font=fonts["body"], fill=color, anchor="lt")
-                x = TEXT_X
-                for text, emphasized in line["runs"]:
-                    draw.text((x, y), text, font=fonts["body"], fill=color if emphasized else "#F4F7F8", anchor="lt")
-                    x += fonts["body"].getlength(text)
-                y += LINE_HEIGHT
-            if row_index < len(group) - 1:
-                draw.line((badge_x, row["top"] + row["height"] - 1, WIDTH - MARGIN - 20, row["top"] + row["height"] - 1), fill="#3E4C54", width=1)
-    draw.text((WIDTH / 2, height - 27), "OVERWATCH  ·  자동 요약", font=fonts["meta"], fill="#5C6D73", anchor="mm")
+        top, bottom = row["top"], row["top"] + row["height"]
+        draw.rounded_rectangle((MARGIN, top, WIDTH - MARGIN, bottom), radius=16, fill="#2C3C45")
+        for index, line in enumerate(row["badge"]):
+            draw.text((MARGIN + PAD, top + PAD + index * HERO_LINE_HEIGHT), line["text"],
+                      font=fonts["hero"], fill=accent, anchor="lt")
+        divider_y = row["body_top"] - HERO_BODY_GAP
+        draw.line((MARGIN + PAD, divider_y, WIDTH - MARGIN - PAD, divider_y), fill="#51636D", width=2)
+        y = row["body_top"]
+        for index, line in enumerate(row["lines"]):
+            y += line["gap_before"]
+            color = COLORS.get(line["category"], COLORS["review"])
+            if line["first"] or index == 0:
+                draw.text((MARGIN + PAD, y), ARROWS.get(line["category"], "?"),
+                          font=fonts["body"], fill=color, anchor="lt")
+            x = TEXT_X
+            for text, emphasized in line["runs"]:
+                draw.text((x, y), text, font=fonts["body"],
+                          fill=color if emphasized else "#F4F7F8", anchor="lt")
+                x += fonts["body"].getlength(text)
+            y += LINE_HEIGHT
+    footer = "OVERWATCH  ·  원문 기반 요약"
+    if page["category"] == "review":
+        footer = "판별 필요  ·  상향 / 하향을 확정하지 않은 항목"
+    draw.text((WIDTH / 2, height - 35), footer, font=fonts["meta"], fill="#53666E", anchor="mm")
     return canvas
+
+
+def _filename_part(value):
+    return re.sub(r"[^\w.-]+", "-", str(value), flags=re.UNICODE).strip("-.") or "unknown"
 
 
 def render_cards(*, patch_id, title, date_key, entries, general_changes, output_dir, font_path):
@@ -190,13 +232,13 @@ def render_cards(*, patch_id, title, date_key, entries, general_changes, output_
     output_dir.mkdir(parents=True, exist_ok=True)
     pages = plan_cards(entries, general_changes, font_path)
     fonts = _fonts(font_path)
-    totals = {category: sum(p["category"] == category for p in pages) for category in LABELS}
-    seen, paths = {}, []
+    paths = []
     for page in pages:
-        category = page["category"]
-        seen[category] = seen.get(category, 0) + 1
-        canvas = _draw_page(page, date_key, seen[category], totals[category], fonts)
-        path = output_dir / f"{patch_id.replace('#', '-')}-summary-{category}-{seen[category]}.png"
+        canvas = _draw_page(page, date_key, page["number"], page["count"], fonts)
+        # Include every grouping dimension and a global index to prevent collisions
+        # even if external labels normalize to the same filesystem-safe spelling.
+        parts = [patch_id, "summary", page["mode"], page["category"], page["role"], page["number"], len(paths) + 1]
+        path = output_dir / ("-".join(_filename_part(part) for part in parts) + ".png")
         canvas.save(path)
         paths.append(path)
     return paths
