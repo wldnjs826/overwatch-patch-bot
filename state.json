@@ -2,7 +2,7 @@
   "title": "오버워치 2 패치 노트 - 2026년 8월 21일",
   "hash": "9128f551e9a94340b9829fcfd9477a466db5057866fec6953ee5e82fa3db7180",
   "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
-  "updated_at_utc": "2026-09-22T06:51:51.048781+00:00",
+  "updated_at_utc": "2026-09-22T07:52:40.167154+00:00",
   "parser": "monthly_all_patch_v1",
   "version": 8,
   "patches": {
@@ -540,31 +540,32 @@
       "date_key": "2026-09-18",
       "same_day_index": 1,
       "title": "오버워치 패치 노트 – 2026년 9월 18일",
-      "body_hash": "fcd96d72a57170b5f8314187e330989f586e798ade1d261292eff6e97226e626",
+      "body_hash": "c1607beb8bf95c38d1972134a2eee2a32948d8d07d450559af70d7e51636bc4d",
       "image_hash": "386c894a9a8c4f1d9ff5a521d4be810a018060f6503b226896e0eb589bbbe34c",
       "image_count": 3,
-      "signature_text": "핫픽스 업데이트 | 핫픽스 업데이트입니다 <date> 패치의 리플레이 코드는 계속 사용할 수 있습니다 | 영웅 업데이트 | d mon | 방어력이 <n>에서 <n>로 감소했습니다 <n>대<n> | 방어력이 <n>에서 <n>으로 감소했습니다 <n>대<n> | 집중 융합 주요 특전 | 탄환당 피해가 <n>에서 <n>으로 감소했습니다 | 추진기 | 연료 소모 속도가 <n>에서 <n>으로 증가했습니다 | 융합 연발총 | 공격력이 <n>에서 <n>로 감소했습니다 | 재사용 대기시간이 <n>초에서 <n>초로 증가했습니다 | 버그 수정 | 스타디움에서 메르시와 관련된 게임플레이 문제를 수정했습니다 이제 모든 스타디움 대기열에서 메르시를 다시 플레이할 수 있습니다",
+      "signature_text": "핫픽스 업데이트 | 핫픽스 업데이트입니다 <date> 패치의 리플레이 코드는 계속 사용할 수 있습니다 | 영웅 업데이트 | d mon | 방어력이 <n>에서 <n>로 감소했습니다 <n>대<n> | 방어력이 <n>에서 <n>으로 감소했습니다 <n>대<n> | 집중 융합 주요 특전 | 탄환당 피해가 <n>에서 <n>으로 감소했습니다 | 추진기 | 연료 소모 속도가 <n>에서 <n>으로 증가했습니다 | 융합 연발총 | 공격력이 <n>에서 <n>로 감소했습니다 | 재사용 대기시간이 <n>초에서 <n>초로 증가했습니다 | 버그 수정 | 스타디움 | 스타디움에서 메르시와 관련된 게임플레이 문제를 수정했습니다 이제 모든 스타디움 대기열에서 메르시를 다시 플레이할 수 있습니다",
       "source_url": "https://overwatch.nexon.com/news/patchnotes/830/patch-2026-09-16",
       "source_name": "nexon",
       "first_seen_source": "nexon",
       "status": "sent",
       "discord_message_ids": [
-        "1551506610034311200",
-        "1551506615591772203"
+        "1551863779954921523"
       ],
       "summary_message_ids": [
-        "1551611598362251397"
+        "1551863786443382814"
       ],
-      "summary_card_version": 3,
+      "summary_card_version": 4,
       "first_seen_utc": "2026-09-21T08:13:21.297471+00:00",
-      "last_seen_utc": "2026-09-22T06:51:51.048777+00:00",
+      "last_seen_utc": "2026-09-22T07:52:38.494861+00:00",
       "sent_at_utc": "2026-09-21T08:13:24.246267+00:00",
-      "last_edited_at_utc": "2026-09-21T08:13:24.246271+00:00",
+      "last_edited_at_utc": "2026-09-22T07:52:38.494880+00:00",
       "sent_source": "nexon",
-      "summary_body_hash": "fcd96d72a57170b5f8314187e330989f586e798ade1d261292eff6e97226e626",
+      "summary_body_hash": "c1607beb8bf95c38d1972134a2eee2a32948d8d07d450559af70d7e51636bc4d",
       "summary_image_hash": "386c894a9a8c4f1d9ff5a521d4be810a018060f6503b226896e0eb589bbbe34c",
       "summary_empty": false,
-      "language_reason": "한국어 본문으로 판별"
+      "language_reason": "한국어 본문으로 판별",
+      "text_format_version": 2,
+      "source_identity": "69b3d121dc7814991bbe01d88e0b4dead2b48e00fb7a9f3c804e3ede063499f8"
     }
   }
 }
