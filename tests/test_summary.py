@@ -197,7 +197,7 @@ class SummaryTests(unittest.TestCase):
             ("재사용 대기시간 감소량이 20%에서 10%로 감소했습니다.", "nerf"),
             ("궁극기 충전 비용 감소가 50%에서 60%로 증가했습니다.", "buff"),
             ("대상당 재사용 대기시간 감소가 2초에서 2.5초로 증가했습니다.", "buff"),
-            ("적응형 방벽 - 주요 특전: 지속 시간이 1.5초에서 1초로 감소했습니다.", "nerf"),
+            ("적응형 방벽 - 주요 특전: 지속 시간이 1.5초에서 1초로 감소했습니다.", "adjust"),
             ("팔라틴 팽: 가로 휘두르기 지속 시간이 0.25초에서 0.2초로 감소했습니다.", "buff"),
             ("팔라틴 팽: 연속 공격 지속 시간이 0.75초에서 0.9초로 증가했습니다.", "nerf"),
         ]
@@ -221,7 +221,7 @@ class SummaryTests(unittest.TestCase):
         parsed = monitor.assign_patch_ids([raw])[0]
         entries = monitor.extract_balance_summary(parsed)
         result = {(r["mode"], r["hero"]): r for r in entries if r["category"] != "review"}
-        for hero, category in {"둠피스트": "nerf", "정커퀸": "buff", "라마트라": "buff", "시그마": "nerf", "캐서디": "nerf", "프레야": "buff", "리퍼": "buff", "벤처": "buff", "아나": "buff", "루시우": "buff", "키리코": "nerf", "시온": "adjust", "마우가": "adjust"}.items():
+        for hero, category in {"둠피스트": "nerf", "정커퀸": "buff", "라마트라": "buff", "시그마": "adjust", "캐서디": "adjust", "프레야": "buff", "리퍼": "adjust", "벤처": "buff", "아나": "buff", "루시우": "buff", "키리코": "nerf", "시온": "adjust", "마우가": "adjust"}.items():
             with self.subTest(hero=hero):
                 self.assertEqual(result[("일반전", hero)]["category"], category)
         self.assertEqual(monitor.classify_change_line(result[("스타디움", "정커퀸")]["changes"][0]), "nerf")
@@ -259,12 +259,12 @@ class SummaryTests(unittest.TestCase):
         entries, _ = monitor.prepare_card_data(parsed)
         core = {e["hero"]: e for e in entries if e["mode"] == "일반전" and e["category"] != "review"}
         expected = {"D.Va": "buff", "도미나": "buff", "안란": "buff", "바티스트": "buff",
-                    "레킹볼": "nerf", "자리야": "nerf", "프레야": "nerf", "시메트라": "nerf", "키리코": "nerf", "젠야타": "nerf",
+                    "레킹볼": "adjust", "자리야": "nerf", "프레야": "adjust", "시메트라": "nerf", "키리코": "nerf", "젠야타": "nerf",
                     "정크랫": "adjust", "시에라": "adjust", "토르비욘": "adjust", "벤데타": "adjust", "브리기테": "adjust", "마우가": "adjust", "제트팩 캣": "nerf"}
         for hero, category in expected.items():
             with self.subTest(hero=hero):
                 self.assertEqual(core[hero]["category"], category)
-        self.assertEqual({line["category"] for line in core["정크랫"]["changes"]}, {"buff", "nerf"})
+        self.assertEqual({line["category"] for line in core["정크랫"]["changes"]}, {"buff", "adjust"})
         self.assertTrue(any("복원" in line or "1.5 → 1" in line for line in (c["text"] for c in core["마우가"]["changes"])))
         review = [entry for entry in entries if entry["mode"] == "일반전" and
                   entry["hero"] == "제트팩 캣" and entry["category"] == "review"]
