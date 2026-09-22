@@ -55,7 +55,7 @@ DISCORD_EMBEDS_PER_MESSAGE = 10
 # 자동 요약 카드 설정
 # ============================================================
 
-SUMMARY_CARD_VERSION = 4
+SUMMARY_CARD_VERSION = 5
 
 # 패치에 영웅 밸런스 변경이 없을 때 만드는 일반 핵심 요약의 최대 항목 수.
 SUMMARY_GENERIC_MAX_ITEMS = 16
