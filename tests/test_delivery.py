@@ -80,7 +80,7 @@ class DeliveryTests(unittest.TestCase):
         record = self.legacy_record()
         self.post.return_value = response("card-1")
         self.assertEqual(self.process(), "updated")
-        self.assertEqual(record["discord_message_ids"], [])
+        self.assertEqual(record["discord_message_ids"], ["text-1"])
         self.assertEqual(record["summary_message_ids"], ["card-1"])
         self.assertEqual(self.process(), "already_sent")
         self.assertEqual(self.post.call_count, 1)
