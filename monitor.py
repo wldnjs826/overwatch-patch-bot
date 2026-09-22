@@ -3069,6 +3069,15 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
         print("영문 또는 불확실 → Discord 전송 안 함 / 한국어판 대기")
         return "pending_korean"
 
+    # Safety lock: old state entries can say "sent" without a Discord message ID.
+    # They must never be backfilled as brand-new messages, even if hashes, source
+    # URLs, card versions, or formatting rules changed later.
+    if was_sent and not record.get("discord_message_ids"):
+        update_seen_record(record, patch, update_hashes=False)
+        record["historical_delivery_locked"] = True
+        print("기존 sent 기록에 Discord message_id 없음 → 자동 재전송/과거 백필 차단")
+        return "already_sent"
+
     if record is None:
         record = make_record(patch, "sending")
         records[patch.patch_id] = record
@@ -3182,16 +3191,28 @@ def preview_patches(patches: list[Patch], state: dict) -> None:
 # ============================================================
 
 
-def select_delivery_patches(patches: list[Patch], latest_only: bool) -> list[Patch]:
-    """Limit delivery after source deduplication and stable ID assignment."""
-    if latest_only and patches:
-        return [max(patches, key=lambda patch: (patch.date_key, patch.same_day_index))]
-    return patches
+def select_delivery_patches(patches: list[Patch], latest_only: bool = True) -> list[Patch]:
+    """Fail closed: production delivery is always limited to one newest patch.
+
+    The latest_only argument is kept only for compatibility with existing tests
+    and callers. Passing False can no longer unlock historical bulk delivery.
+
+    If Nexon and Blizzard both expose the newest date, prefer Nexon so the same
+    patch is not emitted twice from two official sources.
+    """
+    if not patches:
+        return []
+
+    latest_date = max(patch.date_key for patch in patches)
+    same_date = [patch for patch in patches if patch.date_key == latest_date]
+    nexon = [patch for patch in same_date if patch.source_name == "nexon"]
+    pool = nexon or same_date
+
+    return [max(pool, key=lambda patch: patch.same_day_index)]
 
 
 def main() -> int:
     dry_run = os.getenv("DRY_RUN", "false").lower() == "true"
-    latest_only = os.getenv("LATEST_PATCH_ONLY", "false").strip().lower() == "true"
     webhook_url = os.getenv(
         "DISCORD_WEBHOOK_URL",
         "",
@@ -3219,11 +3240,18 @@ def main() -> int:
 
         return 1
 
-    delivery_patches = select_delivery_patches(patches, latest_only)
-    if latest_only:
-        print(f"\n최신 패치 1개만 처리: {len(delivery_patches)}개 선택 / 과거 패치 {len(patches) - len(delivery_patches)}개 제외")
-        for selected in delivery_patches:
-            print(f"선택된 패치: {selected.patch_id} / {selected.title}")
+    # Hard safety boundary: scheduled runs and manual runs both process only
+    # the single newest patch. Environment variables cannot disable this guard.
+    delivery_patches = select_delivery_patches(patches, True)
+    print(
+        f"\n안전 모드: 최신 패치 1개만 처리 / "
+        f"과거·중복 후보 {len(patches) - len(delivery_patches)}개 제외"
+    )
+    for selected in delivery_patches:
+        print(
+            f"선택된 패치: [{selected.source_name.upper()}] "
+            f"{selected.patch_id} / {selected.title}"
+        )
 
     state = load_state()
     if dry_run:
