@@ -37,15 +37,16 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual([r["category"] for r in result], ["buff", "buff"])
         self.assertIn("부스터:", result[0]["changes"][0])
 
-    def test_fuel_cost_increase_is_nerf_and_perk_label_survives(self):
+    def test_perk_change_forces_hero_into_adjustment_and_label_survives(self):
         result = self.summarize([
             ("h4", "영웅 업데이트"), ("h5", "D.Mon"),
             ("p", "집중 융합 - 주요 특전"), ("li", "탄환당 피해가 45에서 36으로 감소했습니다."),
             ("h6", "추진기"), ("li", "연료 소모 속도가 25에서 30으로 증가했습니다."),
         ])
-        self.assertEqual(result[0]["category"], "nerf")
+        self.assertEqual(result[0]["category"], "adjust")
         self.assertIn("집중 융합 - 주요 특전:", result[0]["changes"][0])
         self.assertIn("추진기:", result[0]["changes"][1])
+        self.assertEqual(monitor.classify_change_line(result[0]["changes"][0]), "adjust")
 
     def test_all_hero_changes_survive_without_eight_line_limit(self):
         lines = [("li", f"변경 {n}: 방어력이 200에서 {201 + n}로 증가했습니다.") for n in range(20)]
@@ -59,7 +60,7 @@ class SummaryTests(unittest.TestCase):
             ("p", "니트로 부스트 - 보조 특전"), ("li", "추가 속도가 125%에서 100%로 감소했습니다."),
         ])
         self.assertEqual(result[0]["category"], "adjust")
-        self.assertEqual([monitor.classify_change_line(line) for line in result[0]["changes"]], ["buff", "nerf"])
+        self.assertEqual([monitor.classify_change_line(line) for line in result[0]["changes"]], ["buff", "adjust"])
 
     def test_independent_opposing_clauses_are_mixed_adjustments(self):
         for text in ["공격력이 10에서 12로 증가하고 재사용 대기시간이 8초에서 9초로 증가했습니다.",
