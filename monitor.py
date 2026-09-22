@@ -12,7 +12,6 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 

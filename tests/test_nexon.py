@@ -65,6 +65,25 @@ class NexonParsingTests(unittest.TestCase):
         result = monitor.parse_nexon_article(html, monitor.NEXON_LIST_URL + "/830")
         self.assertEqual(result["items"], [("li", "영웅 생명력이 증가했습니다.")])
 
+    def test_blizzard_fallback_keeps_ability_names_conditions_and_section_boundaries(self):
+        html = """<main><h3>오버워치 패치 노트 - 2026년 9월 18일</h3>
+        <h4>영웅 업데이트</h4><h4>돌격</h4><h5>D.Va</h5>
+        <div class="PatchNotesAbilityUpdate-name">부스터</div>
+        <ul><li>기술 조정<ul><li><p>재사용 대기시간 12초 → 10초 (5대5).</p></li></ul></li></ul>
+        <div class="PatchNotesGeneralUpdate-title">아이템 변경 사항</div>
+        <p>해당 아이템은 스타디움에서만 사용할 수 있습니다.</p>
+        <h3>오버워치 패치 노트 - 2026년 9월 17일</h3>
+        <p>이전 패치에서만 사용한 문장입니다.</p></main>"""
+        raws = monitor.parse_blizzard_page(html, monitor.BLIZZARD_BASE_URL)
+        self.assertEqual(len(raws), 2)
+        self.assertIn(("h6", "부스터"), raws[0]["items"])
+        self.assertIn(("section", "아이템 변경 사항"), raws[0]["items"])
+        original = "\n".join(monitor.format_summary(monitor.assign_patch_ids(raws)[0]))
+        self.assertEqual(original.count("재사용 대기시간 12초 → 10초 (5대5)."), 1)
+        self.assertIn("부스터", original)
+        self.assertIn("스타디움에서만", original)
+        self.assertNotIn("이전 패치에서만", original)
+
 
 if __name__ == "__main__":
     unittest.main()

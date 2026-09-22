@@ -26,6 +26,7 @@ class ManualScopeTests(unittest.TestCase):
         self.stack.enter_context(patch.object(requests.sessions.Session, "request", side_effect=AssertionError("Unexpected network call")))
         self.text = self.stack.enter_context(patch.object(monitor, "sync_discord_messages", return_value=["text-new"]))
         self.cards = self.stack.enter_context(patch.object(monitor, "refresh_summary_cards", return_value=["card-new"]))
+        self.delete = self.stack.enter_context(patch.object(monitor, "delete_discord_message"))
         self.process = self.stack.enter_context(patch.object(monitor, "process_patch", wraps=monitor.process_patch))
         raws = []
         for date, title in [("2026-09-18", "최신"), ("2026-09-18", "같은 날 이전"), ("2026-09-11", "과거")]:
@@ -68,6 +69,7 @@ class ManualScopeTests(unittest.TestCase):
         self.assertEqual([call.args[0].patch_id for call in self.process.call_args_list], [self.latest.patch_id])
         self.text.assert_not_called()
         self.cards.assert_not_called()
+        self.delete.assert_not_called()
         after = monitor.load_state()["patches"]
         for old in (self.same_day_old, self.older):
             self.assertEqual(after[old.patch_id], before[old.patch_id])
