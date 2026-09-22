@@ -50,6 +50,9 @@ class DeliveryTests(unittest.TestCase):
     def legacy_record(self):
         record = monitor.make_record(self.patch, "sent")
         record["text_format_version"] = monitor.TEXT_FORMAT_VERSION
+        # A tracked delivery has a Discord message ID. Historical sent records
+        # without one are covered by a separate fail-closed test below.
+        record["discord_message_ids"] = ["text-1"]
         self.state["patches"][self.patch.patch_id] = record
         return record
 
@@ -60,6 +63,19 @@ class DeliveryTests(unittest.TestCase):
         self.state = monitor.load_state()
         return self.state["patches"][self.patch.patch_id]
 
+    def test_sent_record_without_message_id_is_never_backfilled_or_resent(self):
+        record = monitor.make_record(self.patch, "sent")
+        record["body_hash"] = "old-body-that-would-normally-trigger-update"
+        record["summary_card_version"] = 0
+        self.state["patches"][self.patch.patch_id] = record
+
+        self.assertEqual(self.process(), "already_sent")
+        self.assertTrue(record["historical_delivery_locked"])
+        self.post.assert_not_called()
+        self.edit.assert_not_called()
+        self.delete.assert_not_called()
+        self.generate.assert_not_called()
+
     def test_unchanged_legacy_patch_backfills_cards_once(self):
         record = self.legacy_record()
         self.post.return_value = response("card-1")
@@ -69,14 +85,16 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.process(), "already_sent")
         self.assertEqual(self.post.call_count, 1)
 
-    def test_changed_legacy_patch_sends_replacement_once(self):
+    def test_changed_tracked_patch_edits_text_and_rebuilds_cards_once(self):
         record = self.legacy_record()
         record["body_hash"] = "old"
-        self.post.side_effect = [response("text-1"), response("card-1")]
+        self.edit.return_value = response("text-1")
+        self.post.return_value = response("card-1")
         self.assertEqual(self.process(), "updated")
         self.assertEqual(record["discord_message_ids"], ["text-1"])
         self.assertEqual(self.process(), "already_sent")
-        self.assertEqual(self.post.call_count, 2)
+        self.assertEqual(self.edit.call_count, 1)
+        self.assertEqual(self.post.call_count, 1)
 
     def test_card_version_upgrade_edits_existing_card_once_without_resending_text(self):
         record = self.legacy_record()
@@ -151,10 +169,11 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(record["summary_message_ids"], ["card-1"])
         self.post.assert_not_called()
 
-    def test_previously_discarded_update_is_recovered(self):
+    def test_previously_discarded_tracked_update_is_recovered(self):
         record = self.legacy_record()
         record["last_uneditable_change_utc"] = "2026-09-16T00:00:00Z"
-        self.post.side_effect = [response("text-1"), response("card-1")]
+        self.edit.return_value = response("text-1")
+        self.post.return_value = response("card-1")
         self.process()
         self.assertNotIn("last_uneditable_change_utc", record)
         self.assertEqual(record["discord_message_ids"], ["text-1"])
