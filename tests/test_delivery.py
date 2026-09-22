@@ -49,6 +49,7 @@ class DeliveryTests(unittest.TestCase):
 
     def legacy_record(self):
         record = monitor.make_record(self.patch, "sent")
+        record["text_format_version"] = monitor.TEXT_FORMAT_VERSION
         self.state["patches"][self.patch.patch_id] = record
         return record
 
@@ -291,7 +292,7 @@ class DeliveryTests(unittest.TestCase):
         self.assertIn("변경 없음", output.getvalue())
         self.assertNotIn("대상", output.getvalue())
 
-    def test_text_update_preserves_cards_and_removes_old_image_batch(self):
+    def test_text_update_rebuilds_cards_after_full_original_and_removes_old_image_batch(self):
         self.payloads.side_effect = self.real_build_payloads
         record = self.legacy_record()
         record.update({
@@ -303,15 +304,16 @@ class DeliveryTests(unittest.TestCase):
         })
         self.patch.images = ["https://example.com/updated-image.png"]
         self.patch.image_hash = monitor.build_image_hash(self.patch.images)
+        self.post.return_value = response("card-new")
         self.assertEqual(self.process(), "updated")
-        self.post.assert_not_called()
-        self.assertEqual(self.edit.call_count, 2)
+        self.post.assert_called_once()
+        self.assertEqual(self.edit.call_count, 1)
         self.assertIn("/messages/text-1", self.edit.call_args_list[0].args[0])
-        self.assertIn("files", self.edit.call_args_list[1].kwargs)
-        self.delete.assert_called_once()
+        self.assertIn("files", self.post.call_args.kwargs)
+        self.assertEqual(self.delete.call_count, 2)
         self.assertIn("/messages/old-source-images", self.delete.call_args.args[0])
         self.assertEqual(record["discord_message_ids"], ["text-1"])
-        self.assertEqual(record["summary_message_ids"], ["card-1"])
+        self.assertEqual(record["summary_message_ids"], ["card-new"])
         self.assertEqual(self.process(), "already_sent")
 
 

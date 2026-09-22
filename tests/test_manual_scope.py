@@ -44,7 +44,8 @@ class ManualScopeTests(unittest.TestCase):
             if item is self.latest and not include_latest:
                 continue
             record = monitor.make_record(item, "sent")
-            record.update({"discord_message_ids": ["text-" + item.patch_id],
+            record.update({"text_format_version": monitor.TEXT_FORMAT_VERSION,
+                           "discord_message_ids": ["text-" + item.patch_id],
                            "summary_message_ids": ["card-" + item.patch_id]})
             if item is self.latest:
                 record.update({"summary_card_version": monitor.SUMMARY_CARD_VERSION,
