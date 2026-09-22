@@ -51,6 +51,25 @@ class CardLayoutTests(unittest.TestCase):
         self.assertEqual("".join(rendered.split()), "".join(text.strip().removesuffix(".").split()))
         self.assertGreater(len(pages), 1)
 
+    def test_two_line_change_moves_whole_to_next_page_at_boundary(self):
+        changes = [self.change(f"항목 {index}: 생명력 175 → 200") for index in range(13)]
+        text = "공격력 감소율 최소: 적중한 적에게만 적용 적중한 적에게만 적용 30% → 20%"
+        final_change = self.change(text, "nerf")
+        wrapped = cards.wrap_styled(final_change["text"], final_change["highlights"],
+                                    cards._fonts(monitor._find_font_path)["body"], cards.TEXT_WIDTH)
+        self.assertEqual(len(wrapped), 2)
+        pages = cards.plan_cards([entry([*changes, final_change])], [], monitor._find_font_path)
+        self.assertEqual(len(pages), 2)
+        locations = [(page_index, line) for page_index, page in enumerate(pages)
+                     for row in page["rows"] for line in row["lines"]
+                     if line["change_index"] == 13]
+        self.assertEqual([page_index for page_index, _ in locations], [1, 1])
+        self.assertEqual([line["first"] for _, line in locations], [True, False])
+        self.assertEqual("".join(line["text"] for _, line in locations).replace(" ", ""),
+                         final_change["text"].replace(" ", ""))
+        self.assertTrue(pages[1]["rows"][0]["continued"])
+        self.assertTrue(all(page["rows"] and page["height"] <= cards.MAX_HEIGHT for page in pages))
+
     def test_mixed_changes_retain_individual_colors_and_spans(self):
         changes = [self.change("재사용 대기시간 8초 → 7초", "buff"), self.change("추가 속도 125% → 100%", "nerf")]
         page = cards.plan_cards([entry(changes)], [], monitor._find_font_path)[0]

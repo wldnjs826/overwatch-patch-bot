@@ -131,6 +131,7 @@ class SourceStateTests(unittest.TestCase):
         record = self.state["patches"][blizzard.patch_id]
         self.assertEqual(record["discord_message_ids"], ["existing-text"])
         self.assertEqual(record["status"], "sent")
+        self.assertEqual(record["source_identity"], monitor.source_identity(blizzard))
         self.assertEqual(self.state["patches"][legacy_id]["status"], "duplicate_source")
         self.assertEqual(self.state["patches"][legacy_id]["duplicate_of"], blizzard.patch_id)
         self.sync.assert_not_called()
@@ -154,6 +155,7 @@ class SourceStateTests(unittest.TestCase):
     def test_confirmed_nexon_adopts_blizzard_text_id_and_updates_displayed_source(self):
         blizzard = monitor.choose_patches([], [official_patch("blizzard")])[0]
         original = self.sent_record(blizzard)
+        original.pop("source_identity")  # Pre-v4 records still retain the exact original body hash.
         original.update({"summary_message_ids": ["existing-card"], "summary_empty": False})
         self.cards.return_value = ["replacement-card"]
         nexon = official_patch()

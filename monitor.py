@@ -2918,7 +2918,7 @@ def update_seen_record(
             patch.images
         )
 
-    if update_hashes:
+    if update_hashes or record.get("body_hash") == patch.body_hash:
         record["source_identity"] = source_identity(patch)
     record[
         "signature_text"
@@ -2978,7 +2978,8 @@ def find_cross_source_duplicate(patch: Patch, records: dict) -> tuple[str, dict]
         if (isinstance(record, dict) and record.get("status") == "sent"
                 and record.get("source_name") != patch.source_name
                 and record.get("date_key") == patch.date_key
-                and record.get("source_identity") == identity):
+                and (record.get("source_identity") == identity
+                     or record.get("body_hash") == patch.body_hash)):
             return other_id, record
     return None
 
@@ -3020,7 +3021,8 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
             record = None
     if (record and record.get("status") != "duplicate_source"
             and record.get("source_name") != patch.source_name
-            and record.get("source_identity") != identity):
+            and record.get("source_identity") != identity
+            and record.get("body_hash") != patch.body_hash):
         # A legacy date-only key must not let a different source overwrite a patch.
         preserved_id = patch.patch_id + "-" + str(record.get("source_name", "legacy"))
         if preserved_id in records:

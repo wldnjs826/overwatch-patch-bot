@@ -116,12 +116,16 @@ def plan_cards(entries, general_changes, font_path):
 
         for entry_index, entry in groups[key]:
             lines = []
+            change_heights = {}
             for change_index, change in enumerate(entry["changes"]):
                 wrapped = wrap_styled(change["text"], change.get("highlights", []), fonts["body"], TEXT_WIDTH)
+                change_heights[change_index] = len(wrapped) * LINE_HEIGHT
                 for line_index, line in enumerate(wrapped):
                     lines.append({**line, "category": change.get("category", category),
                                   "first": line_index == 0, "change_index": change_index,
                                   "entry_index": entry_index})
+            continuation_badge = wrap_styled(entry["hero"] + " · 계속", [], fonts["hero"], HERO_WIDTH)
+            continuation_base = 2 * PAD + len(continuation_badge) * HERO_LINE_HEIGHT + HERO_BODY_GAP
             offset = 0
             while offset < len(lines):
                 gap = HERO_GAP if page["rows"] else 0
@@ -138,10 +142,24 @@ def plan_cards(entries, general_changes, font_path):
                 selected, used_height = [], base_height
                 for line in lines[offset:]:
                     before = CHANGE_GAP if selected and line["first"] else 0
+                    if line["first"]:
+                        change_height = change_heights[line["change_index"]]
+                        fresh_base = continuation_base if offset + len(selected) else base_height
+                        fresh_capacity = MAX_HEIGHT - FOOTER - TOP - fresh_base
+                        if (used_height + before + change_height > available
+                                and change_height <= fresh_capacity):
+                            # Keep a change's label, values and conditions together
+                            # whenever the entire change fits on a fresh page.
+                            break
                     if used_height + before + LINE_HEIGHT > available:
                         break
                     selected.append({**line, "gap_before": before})
                     used_height += before + LINE_HEIGHT
+                if not selected:
+                    if not page["rows"]:
+                        raise ValueError("Card page cannot fit the next patch line")
+                    finish()
+                    continue
                 top = cursor + gap
                 row = {"mode": mode, "category": category, "role": role,
                        "hero": entry["hero"], "badge": badge, "continued": offset > 0,
