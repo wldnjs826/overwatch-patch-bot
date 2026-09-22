@@ -1848,6 +1848,13 @@ def _split_change_clauses(text: str) -> list[str]:
 def classify_change_line(text: str) -> str:
     """Classify supported benefits; unknown mechanics are explicitly 'review'."""
     context = clean_text(text).lower()
+
+    # User rule: every perk change belongs to "조정", regardless of whether the
+    # individual numeric effect looks like a buff or nerf. The perk label is
+    # preserved before stripping the ability/context prefix below.
+    if "특전" in context:
+        return "adjust"
+
     normalized = context
     # Ability names are context, not evidence of a buff (e.g. '강화 사격:').
     normalized = normalized.rsplit(":", 1)[-1].strip()
