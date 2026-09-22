@@ -2,7 +2,7 @@
   "title": "오버워치 2 패치 노트 - 2026년 8월 21일",
   "hash": "9128f551e9a94340b9829fcfd9477a466db5057866fec6953ee5e82fa3db7180",
   "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
-  "updated_at_utc": "2026-09-22T17:03:52.227026+00:00",
+  "updated_at_utc": "2026-09-22T20:08:59.288077+00:00",
   "parser": "monthly_all_patch_v1",
   "version": 8,
   "patches": {
@@ -1280,6 +1280,37 @@
       "last_edited_at_utc": "2026-09-22T13:47:14.109923+00:00",
       "sent_source": "blizzard",
       "summary_body_hash": "dc6ad4b643aba643a7eca02f0740be4bba470f7fe34216de6b7262642a6ac198",
+      "summary_empty": false,
+      "language_reason": "한국어 본문으로 판별"
+    },
+    "2026-09-23#01": {
+      "patch_id": "2026-09-23#01",
+      "date_key": "2026-09-23",
+      "same_day_index": 1,
+      "title": "오버워치 패치 노트 - 2026년 9월 23일",
+      "body_hash": "5483a205c664bd594aa4769b33d99890f2cbb5f1a5815add4e0b5034e478e316",
+      "image_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "image_count": 0,
+      "signature_text": "버그 수정 업데이트 | 버그 수정 업데이트입니다 리플레이 코드는 모두 제거되었습니다 | 버그 수정 | 일반 | 팀 드라이브 칭호가 임시 텍스트로 표시되던 문제를 수정했습니다 | 드라이브 시그니처 프레스티지 레벨이 팀 드라이브 후 변경되었던 문제를 수정했습니다 | 애쉬 메탈코어 스킨의 조준 관련 문제를 수정했습니다 | 부산 전장 로딩 화면에서 태극기가 잘못된 방향으로 표시되던 문제를 수정했습니다",
+      "source_identity": "42067502df2a381d513b7cc38716e11088fdeb1d890cbeff4be057d9a941d544",
+      "source_url": "https://overwatch.nexon.com/news/patchnotes/835/patch-2026-09-22",
+      "source_name": "nexon",
+      "first_seen_source": "nexon",
+      "status": "sent",
+      "discord_message_ids": [
+        "1552049080174383125"
+      ],
+      "summary_message_ids": [
+        "1552049086864040057"
+      ],
+      "summary_card_version": 5,
+      "first_seen_utc": "2026-09-22T20:08:56.228806+00:00",
+      "last_seen_utc": "2026-09-22T20:08:57.657254+00:00",
+      "text_format_version": 2,
+      "sent_at_utc": "2026-09-22T20:08:57.657274+00:00",
+      "last_edited_at_utc": "2026-09-22T20:08:57.657278+00:00",
+      "sent_source": "nexon",
+      "summary_body_hash": "5483a205c664bd594aa4769b33d99890f2cbb5f1a5815add4e0b5034e478e316",
       "summary_empty": false,
       "language_reason": "한국어 본문으로 판별"
     }
