@@ -2,7 +2,7 @@
   "title": "오버워치 2 패치 노트 - 2026년 8월 21일",
   "hash": "9128f551e9a94340b9829fcfd9477a466db5057866fec6953ee5e82fa3db7180",
   "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
-  "updated_at_utc": "2026-10-13T18:32:20.948764+00:00",
+  "updated_at_utc": "2026-10-13T23:05:25.586372+00:00",
   "parser": "monthly_all_patch_v1",
   "version": 8,
   "patches": {
@@ -1364,6 +1364,29 @@
       "summary_body_hash": "d199749390bd665cf386a5afbdce1095abeca7af9d6078b47b260ddb06c3454a",
       "summary_empty": false,
       "language_reason": "한국어 본문으로 판별"
+    },
+    "2026-10-13#01-blizzard": {
+      "patch_id": "2026-10-13#01-blizzard",
+      "date_key": "2026-10-13",
+      "same_day_index": 1,
+      "title": "Overwatch Retail Patch Notes – October 13, 2026",
+      "body_hash": "6d659a45eba266df31973bcb66a198f61ee94a5df631b32568f9bc79f58442bd",
+      "image_hash": "40ce67ff904c81dc100e8fa572268ba8326f1d2f55c4bc0ddce839654f1742c3",
+      "image_count": 11,
+      "signature_text": "hotfix update | this is a hotfix update replay codes from the october <n> patch are still available | hero updates | doctrine | eternal scepter | damage and healing reduced from <n> to <n> | invigorating drones | duration reduced from <n> to <n> seconds | sombra | machine pistol | damage reduced from <n> to <n> | cyberspace | explosion damage reduced from <n> to <n> | cooldown increased from <n> to <n> seconds | roadhog | scrap gun | center projectile damage increased from <n> to <n> | take a breather | cooldown reduced from <n> to <n> seconds | damage reduction increased from <n> to <n> | max duration increased from <n> to <n> seconds | kiriko | base health increased from <n> to <n> | d mon | base armor reduced from <n> to <n>",
+      "source_identity": "c25f958a65431b83a96bf5bb9ddbd00c4911f6e2b327f6046e46f6aaf261ab97",
+      "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/10/",
+      "source_name": "blizzard",
+      "first_seen_source": "blizzard",
+      "status": "pending_korean",
+      "discord_message_ids": [],
+      "summary_message_ids": [],
+      "summary_card_version": 0,
+      "first_seen_utc": "2026-10-13T23:05:25.584968+00:00",
+      "last_seen_utc": "2026-10-13T23:05:25.584968+00:00",
+      "language_reason": "영문 또는 한국어 여부 불확실",
+      "pending_body_hash": "6d659a45eba266df31973bcb66a198f61ee94a5df631b32568f9bc79f58442bd",
+      "pending_image_hash": "40ce67ff904c81dc100e8fa572268ba8326f1d2f55c4bc0ddce839654f1742c3"
     }
   }
 }
