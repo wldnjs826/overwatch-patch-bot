@@ -2,7 +2,7 @@
   "title": "오버워치 2 패치 노트 - 2026년 8월 21일",
   "hash": "9128f551e9a94340b9829fcfd9477a466db5057866fec6953ee5e82fa3db7180",
   "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
-  "updated_at_utc": "2026-10-13T23:05:25.586372+00:00",
+  "updated_at_utc": "2026-10-14T01:51:08.732913+00:00",
   "parser": "monthly_all_patch_v1",
   "version": 8,
   "patches": {
@@ -1387,6 +1387,43 @@
       "language_reason": "영문 또는 한국어 여부 불확실",
       "pending_body_hash": "6d659a45eba266df31973bcb66a198f61ee94a5df631b32568f9bc79f58442bd",
       "pending_image_hash": "40ce67ff904c81dc100e8fa572268ba8326f1d2f55c4bc0ddce839654f1742c3"
+    },
+    "2026-10-14#01": {
+      "patch_id": "2026-10-14#01",
+      "date_key": "2026-10-14",
+      "same_day_index": 1,
+      "title": "오버워치 패치 노트 – 2026년 10월 14일",
+      "body_hash": "27beef032c7970c9dcaf59df6eabc87d0784632eac3128be3dcfdc45d749aeab",
+      "image_hash": "7e269d738b15f5b182012d5f17993d5fd53564ed38f8594177d8fdbeb5338df7",
+      "image_count": 11,
+      "signature_text": "핫픽스 업데이트 | 핫픽스 업데이트입니다 <n>월 <n>일 패치의 리플레이 코드는 계속 이용할 수 있습니다 | 영웅 업데이트 | 독트린 | 영겁의 홀 | 공격력과 치유량이 <n>에서 <n>로 감소했습니다 | 활기 드론 | 지속 시간이 <n>초에서 <n>초로 감소했습니다 | 솜브라 | 기관권총 | 공격력이 <n>에서 <n>로 감소했습니다 | 사이버 스페이스 | 폭발 피해가 <n>에서 <n>으로 감소했습니다 | 재사용 대기시간이 <n>초에서 <n>초로 증가했습니다 | 로드호그 | 고철 총 | 중앙 투사체의 피해량이 <n>에서 <n>으로 증가했습니다 | 숨 돌리기 | 재사용 대기시간이 <n>초에서 <n>초로 감소했습니다 | 피해 감소량이 <n>에서 <n>로 증가했습니다 | 최대 지속 시간이 <n>초에서 <n>초로 증가했습니다 | 키리코 | 기본 생명력이 <n>에서 <n>으로 증가했습니다 | d mon | 기본 방어력이 <n>에서 <n>으로 감소했습니다",
+      "source_identity": "0da253e441c414d321d94e688c60c3c5dc880a153a64493d4c2b31e71825acae",
+      "source_url": "https://overwatch.nexon.com/news/patchnotes/848/patch-2026-10-13",
+      "source_name": "nexon",
+      "first_seen_source": "nexon",
+      "status": "sent",
+      "discord_message_ids": [
+        "1559745288338546861"
+      ],
+      "summary_message_ids": [
+        "1559745295594692643",
+        "1559745302150254605",
+        "1559745308513271830",
+        "1559745315513442447",
+        "1559745324375875684",
+        "1559745331531481159",
+        "1559745338410147840"
+      ],
+      "summary_card_version": 5,
+      "first_seen_utc": "2026-10-14T01:50:55.264690+00:00",
+      "last_seen_utc": "2026-10-14T01:50:56.846130+00:00",
+      "text_format_version": 2,
+      "sent_at_utc": "2026-10-14T01:50:56.846149+00:00",
+      "last_edited_at_utc": "2026-10-14T01:50:56.846152+00:00",
+      "sent_source": "nexon",
+      "summary_body_hash": "27beef032c7970c9dcaf59df6eabc87d0784632eac3128be3dcfdc45d749aeab",
+      "summary_empty": false,
+      "language_reason": "한국어 본문으로 판별"
     }
   }
 }
