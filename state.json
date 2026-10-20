@@ -2,7 +2,7 @@
   "title": "오버워치 2 패치 노트 - 2026년 8월 21일",
   "hash": "9128f551e9a94340b9829fcfd9477a466db5057866fec6953ee5e82fa3db7180",
   "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
-  "updated_at_utc": "2026-10-20T17:57:01.494915+00:00",
+  "updated_at_utc": "2026-10-20T21:32:44.084870+00:00",
   "parser": "monthly_all_patch_v1",
   "version": 8,
   "patches": {
@@ -1422,6 +1422,37 @@
       "last_edited_at_utc": "2026-10-14T01:50:56.846152+00:00",
       "sent_source": "nexon",
       "summary_body_hash": "27beef032c7970c9dcaf59df6eabc87d0784632eac3128be3dcfdc45d749aeab",
+      "summary_empty": false,
+      "language_reason": "한국어 본문으로 판별"
+    },
+    "2026-10-21#01": {
+      "patch_id": "2026-10-21#01",
+      "date_key": "2026-10-21",
+      "same_day_index": 1,
+      "title": "오버워치 패치 노트 - 2026년 10월 21일",
+      "body_hash": "6e3df4f3938fc63bfb8d92be03d0e864c627ffe15b8f04fe1261c36799ba1ffb",
+      "image_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "image_count": 0,
+      "signature_text": "버그 수정 업데이트 | 버그 수정 업데이트입니다 리플레이 코드는 모두 제거되었습니다 | 버그 수정 | 일반 | 솜브라에게 감사 표시를 할 경우 고마운 고마움을 담아서 도전 과제가 완료되지 않던 문제를 수정했습니다 | duansense 컨트롤러가 pc에서 제대로 작동하지 않던 문제를 수정했습니다",
+      "source_identity": "5a111ae8f2d942b2cdb10bb5ce68ff1afbe8ada96defed1316165f46ac71fa8f",
+      "source_url": "https://overwatch.nexon.com/news/patchnotes/851/patch-2026-10-20",
+      "source_name": "nexon",
+      "first_seen_source": "nexon",
+      "status": "sent",
+      "discord_message_ids": [
+        "1562217014183854184"
+      ],
+      "summary_message_ids": [
+        "1562217021867950204"
+      ],
+      "summary_card_version": 5,
+      "first_seen_utc": "2026-10-20T21:32:40.745913+00:00",
+      "last_seen_utc": "2026-10-20T21:32:42.279929+00:00",
+      "text_format_version": 2,
+      "sent_at_utc": "2026-10-20T21:32:42.279955+00:00",
+      "last_edited_at_utc": "2026-10-20T21:32:42.279958+00:00",
+      "sent_source": "nexon",
+      "summary_body_hash": "6e3df4f3938fc63bfb8d92be03d0e864c627ffe15b8f04fe1261c36799ba1ffb",
       "summary_empty": false,
       "language_reason": "한국어 본문으로 판별"
     }
