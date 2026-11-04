@@ -21,9 +21,9 @@ COLORS = {
 }
 LABELS = {
     "buff": "상향", "nerf": "하향", "adjust": "조정",
-    "review": "판별 필요", "general": "핵심 요약", "neutral": "기타 변경",
+    "review": "변경 사항", "general": "핵심 요약", "neutral": "기타 변경",
 }
-ARROWS = {"buff": "↑", "nerf": "↓", "adjust": "↔", "review": "?", "general": "•", "neutral": "•"}
+ARROWS = {"buff": "↑", "nerf": "↓", "adjust": "↔", "review": "•", "general": "•", "neutral": "•"}
 ROLE_ORDER = {"돌격": 0, "공격": 1, "지원": 2, "영웅": 3, "일반": 4}
 MODE_ORDER = {"일반전": 0, "스타디움": 1}
 CATEGORY_ORDER = {"buff": 0, "nerf": 1, "adjust": 2, "review": 3, "neutral": 4, "general": 5}
@@ -218,7 +218,7 @@ def _draw_page(page, date_key, number, count, fonts):
             y += LINE_HEIGHT
     footer = "OVERWATCH  ·  원문 기반 요약"
     if page["category"] == "review":
-        footer = "판별 필요  ·  상향 / 하향을 확정하지 않은 항목"
+        footer = "원문 변경 사항  ·  상향 / 하향 구분 없음"
     draw.text((WIDTH / 2, height - 35), footer, font=fonts["meta"], fill="#53666E", anchor="mm")
     return canvas
 

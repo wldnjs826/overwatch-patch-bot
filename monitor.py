@@ -19,6 +19,7 @@ import requests
 from bs4 import BeautifulSoup, Tag
 from summary_text import compact_change
 from summary_cards import render_cards
+from balance_context import classify_ability_metric
 
 
 # ============================================================
@@ -55,7 +56,7 @@ DISCORD_EMBEDS_PER_MESSAGE = 10
 # 자동 요약 카드 설정
 # ============================================================
 
-SUMMARY_CARD_VERSION = 5
+SUMMARY_CARD_VERSION = 6
 
 # 패치에 영웅 밸런스 변경이 없을 때 만드는 일반 핵심 요약의 최대 항목 수.
 SUMMARY_GENERIC_MAX_ITEMS = 16
@@ -1718,6 +1719,7 @@ def _is_generic_section(value: str) -> bool:
 
 def _role_from_heading(value: str) -> str | None:
     normalized = _normalize_heading(value)
+    normalized = re.sub(r"\s+(?:영웅|heroes)$", "", normalized)
 
     for key, role in ROLE_ALIASES.items():
         if normalized == key:
@@ -1845,7 +1847,7 @@ def _split_change_clauses(text: str) -> list[str]:
     return [part.strip() for part in re.split(r"\n|[;；]\s*|(?<=[.!?])\s+(?=[가-힣A-Za-z])", separated) if part.strip()]
 
 
-def classify_change_line(text: str) -> str:
+def classify_change_line(text: str, *, hero: str = "", mode: str = "") -> str:
     """Classify supported benefits; unknown mechanics are explicitly 'review'."""
     context = clean_text(text).lower()
 
@@ -1861,7 +1863,10 @@ def classify_change_line(text: str) -> str:
     clauses = _split_change_clauses(normalized)
     if len(clauses) > 1:
         ability = context.rsplit(":", 1)[0] + ": " if ":" in context else ""
-        return _combine_change_classes({classify_change_line(ability + clause) for clause in clauses})
+        return _combine_change_classes({
+            classify_change_line(ability + clause, hero=hero, mode=mode)
+            for clause in clauses
+        })
     if re.search(r"(?:증가|감소|상향|하향|강화|약화).{0,12}(?:않|아니|못)", normalized):
         return "review"
     if len(CHANGE_NUMBER_RE.findall(normalized)) > 1:
@@ -1879,9 +1884,20 @@ def classify_change_line(text: str) -> str:
 
     # Presentation-only changes have no numeric combat benefit. Keep their row
     # visible, without overriding a hero's otherwise clear buff/nerf category.
-    if re.search(r"시각 효과|음향|효과음|카메라|1인칭.*애니메이션", normalized):
+    # A UI tracker can mention a healing ability without changing its healing.
+    if (re.search(r"\bui 요소를 (?:추가|제거)했습니다\.?$", normalized)
+            and not re.search(r"\d|증가|감소|상향|하향|강화|약화", normalized)):
+        return "neutral"
+    if re.search(r"시각 효과|음향|효과음|카메라|1인칭.*애니메이션|\bui\b|조준선", normalized):
         if not re.search(r"공격력|피해|치유|재사용 대기|생명력|비용|탄약|재생률", normalized):
             return "neutral"
+
+    ability = context.rsplit(":", 1)[0].strip() if ":" in context else ""
+    contextual = classify_ability_metric(
+        hero=hero, mode=mode, ability=ability, metric=metric, direction=direction,
+    )
+    if contextual is not None:
+        return contextual
 
     if re.search(r"최대 분산도에 도달하기까지의 탄환 수", metric):
         return "buff" if direction > 0 else "nerf" if direction < 0 else "review"
@@ -2042,7 +2058,7 @@ def extract_balance_summary(
 
         classifications = [
             classify_change_line(
-                line
+                line, hero=hero, mode=mode,
             )
             for line in changes
         ]
@@ -2155,7 +2171,9 @@ def prepare_card_data(patch: Patch) -> tuple[list[dict], list[dict]]:
     entries = []
     for entry in extract_balance_summary(patch):
         changes = [
-            ({**compact_change(line), "category": classify_change_line(line)}
+            ({**compact_change(line), "category": classify_change_line(
+                line, hero=entry["hero"], mode=entry["mode"],
+            )}
              if entry["category"] != "review" else
              {"text": line, "highlights": [], "category": "review"})
             for line in entry["changes"]
