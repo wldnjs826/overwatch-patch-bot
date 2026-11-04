@@ -21,6 +21,8 @@ jobs:
       - name: Install Korean fonts for card rendering
         run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
       - run: python -m unittest discover -s tests -v
+      - name: Check Python syntax without sending Discord messages
+        run: python -m compileall -q monitor.py balance_context.py summary_text.py summary_cards.py test_latest.py scripts tests
       - name: Render offline card samples
         run: python scripts/render_card_samples.py
       - uses: actions/upload-artifact@v7
