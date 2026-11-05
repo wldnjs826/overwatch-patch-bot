@@ -24,7 +24,7 @@ jobs:
       - name: Check Python syntax without sending Discord messages
         run: python -m compileall -q monitor.py balance_context.py patch_revisions.py summary_text.py summary_cards.py test_latest.py scripts tests
       - name: Render offline card samples
-        run: python scripts/render_card_samples.py
+        run: python scripts/chat_preview.py
       - uses: actions/upload-artifact@v7
         with:
           name: summary-card-previews
