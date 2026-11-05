@@ -125,7 +125,7 @@ class OfficialSourceContractTests(unittest.TestCase):
 
 
 class OrderedDiscordContractTests(unittest.TestCase):
-    def test_legacy_original_repair_rebuilds_cards_after_text_and_resumes_deletions(self):
+    def test_original_format_repair_preserves_existing_cards_without_reposting(self):
         paragraphs = [f"원문 조건 {index}: " + "아군에게만 적용하며 방벽은 제외됩니다. " * 55
                       + "재사용 대기시간 12초 → 10초 (6대6)." for index in range(5)]
         patch_note = official_patch([("p", text) for text in paragraphs])
@@ -136,59 +136,26 @@ class OrderedDiscordContractTests(unittest.TestCase):
                        "summary_body_hash": patch_note.body_hash})
         state = monitor.empty_state()
         state["patches"][patch_note.patch_id] = record
-        events, fail_once = [], [True]
-
-        def ok(message_id="result"):
-            result = Mock(status_code=200, headers={})
-            result.json.return_value = {"id": message_id}
-            return result
-
-        def delete(url, **_kwargs):
-            message_id = url.rsplit("/", 1)[-1]
-            events.append(("delete", message_id))
-            if message_id == "old-card-2" and fail_once[0]:
-                fail_once[0] = False
-                raise requests.ConnectionError("interrupted before acknowledgement")
-            return ok()
-
-        def edit(_url, **kwargs):
-            events.append(("text", kwargs["json"]["content"]))
-            return ok("old-text")
-
-        def upload(_url, **kwargs):
-            events.append(("card", "new-card") if "files" in kwargs else ("text", kwargs["json"]["content"]))
-            return ok(f"new-{len(events)}")
-
+        received = []
+        def sync(_url, ids, payloads, on_progress):
+            received.extend(payloads)
+            return ids
         with tempfile.TemporaryDirectory() as directory, contextlib.ExitStack() as stack:
             stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
             stack.enter_context(patch.object(monitor, "STATE_FILE", Path(directory) / "state.json"))
-            stack.enter_context(patch.object(monitor.time, "sleep"))
             stack.enter_context(patch.object(requests.sessions.Session, "request", side_effect=AssertionError("Unexpected network call")))
-            stack.enter_context(patch.object(monitor.requests, "delete", side_effect=delete))
-            stack.enter_context(patch.object(monitor.requests, "patch", side_effect=edit))
-            stack.enter_context(patch.object(monitor.requests, "post", side_effect=upload))
-            card = Path(directory) / "card.png"
-            card.write_bytes(b"mock card")
-            stack.enter_context(patch.object(monitor, "generate_summary_cards", return_value=[card]))
+            stack.enter_context(patch.object(monitor, "sync_discord_messages", side_effect=sync))
+            upload = stack.enter_context(patch.object(monitor, "send_summary_cards"))
+            delete = stack.enter_context(patch.object(monitor, "delete_discord_message"))
             webhook = "https://discord.invalid/api/webhooks/test/token"
-            with self.assertRaises(requests.ConnectionError):
-                monitor.process_patch(patch_note, state, webhook)
-            state = monitor.load_state()
-            self.assertEqual(state["patches"][patch_note.patch_id]["summary_message_ids"], ["old-card-2"])
-            monitor.process_patch(patch_note, state, webhook)
-            self.assertEqual(state["patches"][patch_note.patch_id]["text_format_version"], monitor.TEXT_FORMAT_VERSION)
-            count = len(events)
+            self.assertEqual(monitor.process_patch(patch_note, state, webhook), "updated")
             self.assertEqual(monitor.process_patch(patch_note, state, webhook), "already_sent")
-            self.assertEqual(len(events), count)
-
-        self.assertEqual(events.count(("delete", "old-card-1")), 1)
-        self.assertEqual(events.count(("delete", "old-card-2")), 2)
-        self.assertEqual([kind for kind, _ in events[:3]], ["delete"] * 3)
-        self.assertTrue(all(kind == "text" for kind, _ in events[3:-1]))
-        self.assertEqual(events[-1][0], "card")
-        received = "".join(without_sequence(content) for kind, content in events if kind == "text")
+            upload.assert_not_called()
+            delete.assert_not_called()
+        self.assertEqual(record["summary_message_ids"], ["old-card-1", "old-card-2"])
+        original = "".join(item["content"] for item in received)
         for text in paragraphs:
-            self.assertIn(text, received)
+            self.assertIn(text, original)
 
     def test_complete_original_precedes_all_normal_cards_then_all_stadium_cards(self):
         items = [("developer", "개발자의 의견: 0.25초와 20%p는 원문 그대로 유지하며, 방벽에는 적용되지 않습니다.")]

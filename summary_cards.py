@@ -180,13 +180,15 @@ def plan_cards(entries, general_changes, font_path):
     return pages
 
 
-def _draw_page(page, date_key, number, count, fonts):
+def _draw_page(page, date_key, number, count, fonts, revision=False):
     height = page["height"]
     canvas = Image.new("RGB", (WIDTH, height), "#F3F7F7")
     draw = ImageDraw.Draw(canvas)
     accent = COLORS[page["category"]]
     draw.rectangle((0, 0, WIDTH, 10), fill=accent)
     mode_label = "일반 모드" if page["mode"] == "일반전" else page["mode"]
+    if revision:
+        mode_label += " · 수정 사항"
     draw.text((MARGIN, 34), mode_label, font=fonts["meta"], fill="#405760", anchor="lt")
     draw.text((WIDTH - MARGIN, 34), str(date_key), font=fonts["meta"], fill="#53636B", anchor="rt")
     draw.rounded_rectangle((MARGIN, 85, MARGIN + 76, 161), radius=16, fill=accent)
@@ -227,14 +229,14 @@ def _filename_part(value):
     return re.sub(r"[^\w.-]+", "-", str(value), flags=re.UNICODE).strip("-.") or "unknown"
 
 
-def render_cards(*, patch_id, title, date_key, entries, general_changes, output_dir, font_path):
+def render_cards(*, patch_id, title, date_key, entries, general_changes, output_dir, font_path, revision=False):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     pages = plan_cards(entries, general_changes, font_path)
     fonts = _fonts(font_path)
     paths = []
     for page in pages:
-        canvas = _draw_page(page, date_key, page["number"], page["count"], fonts)
+        canvas = _draw_page(page, date_key, page["number"], page["count"], fonts, revision)
         # Include every grouping dimension and a global index to prevent collisions
         # even if external labels normalize to the same filesystem-safe spelling.
         parts = [patch_id, "summary", page["mode"], page["category"], page["role"], page["number"], len(paths) + 1]
