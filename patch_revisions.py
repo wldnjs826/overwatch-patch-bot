@@ -95,6 +95,8 @@ def changed_entries(before, after, *, classify, role_from_heading, hero_roles):
         if atom["hero"] == "주요 변경":
             category = "review"
         if previous and previous["text"] == atom["text"] and previous["ability"] != atom["ability"]:
+            # A corrected label does not change the already-published game metric.
+            category = "neutral"
             key = (atom["mode"], atom["role"], atom["hero"], previous["ability"], atom["ability"])
             if key in label_corrections:
                 continue
