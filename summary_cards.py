@@ -45,7 +45,7 @@ def wrap_styled(text, spans, font, width):
             end += 1
         if end == start:
             raise ValueError("Card text area is narrower than a character")
-        if end < len(text) and space > start + (end - start) // 3:
+        if end < len(text) and text[end] != "\n" and space > start + (end - start) // 3:
             end = space
         visible_end = end
         while visible_end > start and text[visible_end - 1].isspace():
