@@ -3193,7 +3193,8 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
     # Safety lock: old state entries can say "sent" without a Discord message ID.
     # They must never be backfilled as brand-new messages, even if hashes, source
     # URLs, card versions, or formatting rules changed later.
-    if was_sent and not record.get("discord_message_ids"):
+    if (was_sent and not record.get("discord_message_ids")
+            and not record.get("pending_revision") and not record.get("initial_summary_pending")):
         update_seen_record(record, patch, update_hashes=False)
         record["historical_delivery_locked"] = True
         print("기존 sent 기록에 Discord message_id 없음 → 자동 재전송/과거 백필 차단")

@@ -242,6 +242,23 @@ class RevisionDeliveryTests(unittest.TestCase):
         self.assertEqual(len(self.posts), 1)
         self.delete.assert_not_called()
 
+    def test_deleted_source_replacement_can_resume_after_all_old_ids_are_removed(self):
+        self.edit.return_value = self.response(status=404)
+        self.delete.return_value = self.response(status=404)
+        self.post.side_effect = requests.ConnectionError("source replacement interrupted")
+        with self.assertRaises(requests.ConnectionError):
+            self.process()
+        self.state = monitor.load_state()
+        self.record = self.state["patches"][self.new.patch_id]
+        self.assertEqual(self.record["discord_message_ids"], [])
+        self.assertFalse(self.record["pending_revision"]["text_done"])
+        self.post.side_effect = self.upload
+        self.assertEqual(self.process(), "updated")
+        self.assertEqual(self.record["discord_message_ids"], ["new-1"])
+        self.assertEqual(self.record["summary_message_ids"], ["old-card"])
+        self.assertEqual(len(self.posts), 2)
+        self.assertNotIn("historical_delivery_locked", self.record)
+
     def test_first_delivery_is_full_and_later_delivery_is_incremental(self):
         self.state["patches"].clear()
         self.assertEqual(self.process(self.old), "sent")
