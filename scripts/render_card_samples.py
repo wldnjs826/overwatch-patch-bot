@@ -106,6 +106,9 @@ def main():
     fixture = Path(__file__).resolve().parents[1] / "tests/fixtures/nexon-article.html"
     raw = monitor.parse_nexon_article(fixture.read_text(encoding="utf-8"), "https://overwatch.nexon.com/news/patchnotes/830")
     examples["nexon-fixture"] = monitor.assign_patch_ids([raw])[0]
+    fixture = Path(__file__).resolve().parents[1] / "tests/fixtures/nexon-nov4-tank-nerfs.html"
+    raw = monitor.parse_nexon_article(fixture.read_text(encoding="utf-8"), "https://overwatch.nexon.com/news/patchnotes/858/patch-2026-11-03")
+    examples["nexon-nov4-tank-nerfs"] = monitor.assign_patch_ids([raw])[0]
     fixture_urls = {
         "nexon-july15": "https://overwatch.nexon.com/news/patchnotes/689/patch-2026-07-14",
         "nexon-sept9": "https://overwatch.nexon.com/news/patchnotes/820/patch-2026-09-08",

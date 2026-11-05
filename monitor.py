@@ -57,7 +57,7 @@ DISCORD_EMBEDS_PER_MESSAGE = 10
 # 자동 요약 카드 설정
 # ============================================================
 
-SUMMARY_CARD_VERSION = 7
+SUMMARY_CARD_VERSION = 8
 
 # 패치에 영웅 밸런스 변경이 없을 때 만드는 일반 핵심 요약의 최대 항목 수.
 SUMMARY_GENERIC_MAX_ITEMS = 16
@@ -1851,12 +1851,6 @@ def _split_change_clauses(text: str) -> list[str]:
 def classify_change_line(text: str, *, hero: str = "", mode: str = "") -> str:
     """Classify supported benefits; unknown mechanics are explicitly 'review'."""
     context = clean_text(text).lower()
-
-    # User rule: every perk change belongs to "조정", regardless of whether the
-    # individual numeric effect looks like a buff or nerf. The perk label is
-    # preserved before stripping the ability/context prefix below.
-    if "특전" in context:
-        return "adjust"
 
     normalized = context
     # Ability names are context, not evidence of a buff (e.g. '강화 사격:').

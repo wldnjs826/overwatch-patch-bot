@@ -51,7 +51,7 @@ class SourceDiffTests(unittest.TestCase):
         new = note(hero_lines("피해량 30 → 28", ability="음파 분열 - 보조 특전"))
         entries = diff(old, new)
         self.assertEqual(len(entries), 1)
-        self.assertEqual(entries[0]["category"], "adjust")
+        self.assertEqual(entries[0]["category"], "neutral")
         text = entries[0]["changes"][0]["text"]
         self.assertIn("음파 분열 - 보조 특전", text)
         self.assertIn("음파 분열 - 주요 특전 → 음파 분열 - 보조 특전", text)

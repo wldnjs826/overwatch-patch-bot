@@ -80,13 +80,13 @@ class FreeClassificationTests(unittest.TestCase):
                 self.assertEqual(monitor.classify_change_line(
                     "튕겨내기: " + text, hero="겐지", mode="일반전"), "review")
 
-    def test_context_survives_clause_splitting_and_perks_keep_adjustment_rule(self):
+    def test_context_survives_clause_splitting_and_unsupported_perks_remain_unknown(self):
         self.assertEqual(monitor.classify_change_line(
             "튕겨내기: 지속 시간이 2초에서 1.5초로 감소하고 재사용 대기시간이 8초에서 7초로 감소했습니다.",
             hero="겐지", mode="일반전"), "adjust")
         self.assertEqual(monitor.classify_change_line(
             "튕겨내기 - 주요 특전: 지속 시간이 2초에서 1.5초로 감소했습니다.",
-            hero="겐지", mode="일반전"), "adjust")
+            hero="겐지", mode="일반전"), "review")
 
     def test_ui_and_crosshair_changes_do_not_change_combat_category(self):
         lines = [
