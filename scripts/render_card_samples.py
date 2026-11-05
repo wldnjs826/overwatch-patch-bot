@@ -135,6 +135,25 @@ def main():
             print(f"Rendered {name}: {len(paths)} cards")
             if name.startswith("nexon-"):
                 print("Hero classification: " + ", ".join(f"{entry.get('mode', '')} {entry['hero']}={entry['category']}" for entry in entries))
+        before = sample("원문 수정 전", [
+            ("h4", "영웅 업데이트"), ("h4", "지원"), ("h5", "루시우"),
+            ("h6", "음파 분열 - 주요 특전"), ("li", "공격력이 30에서 28로 감소했습니다."),
+            ("h6", "소리 방벽"), ("li", "궁극기 비용이 6% 감소했습니다."),
+        ])
+        after = sample("원문 수정 후", [
+            ("h4", "영웅 업데이트"), ("h4", "지원"), ("h5", "루시우"),
+            ("h6", "음파 분열 - 보조 특전"), ("li", "공격력이 30에서 28로 감소했습니다."),
+            ("h6", "소리 방벽"), ("li", "궁극기 비용이 6% 감소했습니다."),
+        ])
+        delta = monitor.changed_entries(
+            monitor.format_summary(before)[4:], monitor.format_summary(after)[4:],
+            classify=monitor.classify_change_line, role_from_heading=monitor._role_from_heading,
+            hero_roles={},
+        )
+        paths = monitor.generate_summary_cards(after, destination / "revision-only",
+                                               entries_override=delta, revision=True)
+        manifest["revision-only"] = {"files": [str(path) for path in paths], "entries": delta}
+        print(f"Rendered revision-only: {len(paths)} cards")
     (destination / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

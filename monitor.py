@@ -10,7 +10,7 @@ import time
 import tempfile
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
@@ -20,6 +20,7 @@ from bs4 import BeautifulSoup, Tag
 from summary_text import compact_change
 from summary_cards import render_cards
 from balance_context import classify_ability_metric
+from patch_revisions import changed_entries
 
 
 # ============================================================
@@ -56,7 +57,7 @@ DISCORD_EMBEDS_PER_MESSAGE = 10
 # 자동 요약 카드 설정
 # ============================================================
 
-SUMMARY_CARD_VERSION = 6
+SUMMARY_CARD_VERSION = 7
 
 # 패치에 영웅 밸런스 변경이 없을 때 만드는 일반 핵심 요약의 최대 항목 수.
 SUMMARY_GENERIC_MAX_ITEMS = 16
@@ -2199,8 +2200,8 @@ def prepare_card_data(patch: Patch) -> tuple[list[dict], list[dict]]:
     return entries, general
 
 
-def generate_summary_cards(patch: Patch, output_dir: Path) -> list[Path]:
-    entries, general = prepare_card_data(patch)
+def generate_summary_cards(patch: Patch, output_dir: Path, *, entries_override=None, revision=False) -> list[Path]:
+    entries, general = prepare_card_data(patch) if entries_override is None else (entries_override, [])
     return render_cards(
         patch_id=patch.patch_id,
         title=patch.title,
@@ -2209,6 +2210,7 @@ def generate_summary_cards(patch: Patch, output_dir: Path) -> list[Path]:
         general_changes=general,
         output_dir=output_dir,
         font_path=_find_font_path,
+        revision=revision,
     )
 
 
@@ -2217,14 +2219,16 @@ def send_summary_cards(
     patch: Patch,
     old_message_ids: list[str] | None = None,
     on_progress: Callable[[list[str]], None] | None = None,
+    *, entries_override=None, revision=False,
 ) -> list[str]:
     """Update cards in order, rebuilding a missing suffix with checkpoints."""
     message_ids = list(old_message_ids or [])
     with tempfile.TemporaryDirectory(prefix="ow-summary-") as temp_dir:
-        paths = generate_summary_cards(patch, Path(temp_dir))
+        paths = (generate_summary_cards(patch, Path(temp_dir), entries_override=entries_override, revision=True)
+                 if revision else generate_summary_cards(patch, Path(temp_dir)))
         for index, path in enumerate(paths):
             payload = {
-                "content": f"**자동 요약 카드 [{index + 1}/{len(paths)}]**",
+                "content": f"**{'패치노트 수정 사항' if revision else '자동 요약 카드'} [{index + 1}/{len(paths)}]**",
                 "allowed_mentions": {"parse": []},
                 "attachments": [{"id": 0, "filename": path.name}],
             }
@@ -3021,6 +3025,98 @@ def summary_is_current(record: dict, patch: Patch) -> bool:
     )
 
 
+def read_delivered_source(webhook_url: str, message_ids: list[str]) -> list[str]:
+    """Recover a pre-snapshot baseline before editing any existing source message."""
+    pieces = []
+    for message_id in message_ids:
+        response = discord_request(requests.get, discord_message_url(webhook_url, message_id), timeout=30)
+        response.raise_for_status()
+        content = response.json().get("content")
+        if not isinstance(content, str):
+            raise RuntimeError("기존 원문 메시지의 비교 자료를 읽지 못했습니다")
+        pieces.append(re.sub(r"\A\*\*\[\d+/\d+\]\*\*\n", "", content))
+    lines = "".join(pieces).splitlines()
+    if len(lines) < 4 or not lines[0].startswith("# ") or not lines[1].startswith("출처:"):
+        raise RuntimeError("기존 원문 형식을 확인할 수 없어 전체 카드 재전송을 중단합니다")
+    return lines[4:]
+
+
+def resume_revision(record: dict, state: dict, webhook_url: str) -> None:
+    pending = record["pending_revision"]
+    target = Patch(**pending["patch"])
+
+    def text_progress(ids):
+        record["discord_message_ids"] = ids
+        save_state(state)
+
+    if not pending.get("text_done"):
+        record["discord_message_ids"] = sync_discord_messages(
+            webhook_url, record.get("discord_message_ids", []),
+            build_discord_payloads(target), text_progress,
+        )
+        update_seen_record(record, target)
+        record["text_format_version"] = TEXT_FORMAT_VERSION
+        record["last_edited_at_utc"] = datetime.now(timezone.utc).isoformat()
+        record["sent_source"] = target.source_name
+        record["status"] = "sent"
+        record.pop("last_uneditable_change_utc", None)
+        pending["text_done"] = True
+        save_state(state)
+
+    def card_progress(ids):
+        pending["message_ids"] = ids
+        save_state(state)
+
+    if pending["entries"]:
+        ids = send_summary_cards(
+            webhook_url, target, pending.get("message_ids", []), card_progress,
+            entries_override=pending["entries"], revision=True,
+        )
+        record.setdefault("revision_batches", []).append({
+            "body_hash": target.body_hash, "message_ids": ids,
+        })
+    record["summary_source_lines"] = format_summary(target)[4:]
+    record["summary_body_hash"] = target.body_hash
+    record["summary_card_version"] = SUMMARY_CARD_VERSION
+    record.pop("pending_revision")
+    save_state(state)
+
+
+def process_tracked_revision(patch: Patch, record: dict, state: dict, webhook_url: str) -> str:
+    resumed = bool(record.get("pending_revision"))
+    if resumed:
+        # Finish the frozen revision first, even if the site changed again.
+        resume_revision(record, state, webhook_url)
+    changed = record.get("body_hash") != patch.body_hash
+    text_needed = (changed or record.get("source_url") != patch.source_url
+                   or record.get("last_uneditable_change_utc")
+                   or record.get("text_format_version", 0) < TEXT_FORMAT_VERSION)
+    if not text_needed:
+        # Upgrade/baseline without touching existing cards. Renderer changes
+        # alone are never a reason to announce the whole patch again.
+        record.setdefault("summary_source_lines", format_summary(patch)[4:])
+        record["summary_card_version"] = SUMMARY_CARD_VERSION
+        record["summary_body_hash"] = patch.body_hash
+        update_seen_record(record, patch, update_hashes=False)
+        save_state(state)
+        print("이미 전송 완료 → 원문 변경 없음 / 전체 카드 재게시 안 함")
+        return "updated" if resumed else "already_sent"
+    before = record.get("summary_source_lines")
+    if before is None:
+        before = (read_delivered_source(webhook_url, record["discord_message_ids"])
+                  if changed else format_summary(patch)[4:])
+    entries = changed_entries(
+        before, format_summary(patch)[4:], classify=classify_change_line,
+        role_from_heading=_role_from_heading, hero_roles=patch.hero_roles,
+    ) if changed else []
+    record["pending_revision"] = {"patch": asdict(patch), "entries": entries,
+                                  "text_done": False, "message_ids": []}
+    save_state(state)
+    resume_revision(record, state, webhook_url)
+    print(f"원문 수정 완료 / 변경 항목만 카드로 전송: {sum(len(e['changes']) for e in entries)}개")
+    return "updated"
+
+
 def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
     records = state.setdefault("patches", {})
     record = records.get(patch.patch_id)
@@ -3097,15 +3193,25 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
     # Safety lock: old state entries can say "sent" without a Discord message ID.
     # They must never be backfilled as brand-new messages, even if hashes, source
     # URLs, card versions, or formatting rules changed later.
-    if was_sent and not record.get("discord_message_ids"):
+    if (was_sent and not record.get("discord_message_ids")
+            and not record.get("pending_revision") and not record.get("initial_summary_pending")):
         update_seen_record(record, patch, update_hashes=False)
         record["historical_delivery_locked"] = True
         print("기존 sent 기록에 Discord message_id 없음 → 자동 재전송/과거 백필 차단")
         return "already_sent"
 
+    if was_sent and not record.get("initial_summary_pending"):
+        result = process_tracked_revision(patch, record, state, webhook_url)
+        record["language_reason"] = language.reason
+        record.pop("pending_body_hash", None)
+        record.pop("pending_image_hash", None)
+        save_state(state)
+        return result
+
     if record is None:
         record = make_record(patch, "sending")
         records[patch.patch_id] = record
+    record["initial_summary_pending"] = True
 
     # Source images are metadata only; changing one must not resend text/cards.
     changed = record.get("body_hash") != patch.body_hash
@@ -3129,8 +3235,7 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
         record["status"] = "sending"
         # An interrupted edit must resume even if the source reverts to the old hash.
         save_state(state)
-        # New text chunks/404 replacements appear at the end of the channel.
-        # Rebuild the card block afterwards so all original text precedes all cards.
+        # Only an interrupted FIRST delivery may replace a partial initial block.
         old_cards = list(record.get("summary_message_ids", []))
         if old_cards:
             record["summary_card_version"] = 0
@@ -3172,6 +3277,8 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
         save_state(state)
 
     record["language_reason"] = language.reason
+    record["summary_source_lines"] = format_summary(patch)[4:]
+    record.pop("initial_summary_pending", None)
     record.pop("pending_body_hash", None)
     record.pop("pending_image_hash", None)
     if text_needed:
@@ -3199,15 +3306,14 @@ def preview_patches(patches: list[Patch], state: dict) -> None:
             action = "신규/미완료 전송 대상"
         elif not record.get("discord_message_ids"):
             action = "과거 sent 기록(message_id 없음) → 자동 재전송 차단"
+        elif record.get("pending_revision"):
+            action = "미완료 수정 사항 카드 이어서 전송"
         elif (record.get("body_hash") != patch.body_hash
               or record.get("last_uneditable_change_utc")
               or (record.get("discord_message_ids") and
                   record.get("text_format_version", 0) < TEXT_FORMAT_VERSION)
               or record.get("source_url") != patch.source_url):
-            action = "기존 메시지 수정/ID 없는 수정본 복구 대상"
-        elif (record.get("migration") != "fresh_install_baseline"
-              and not summary_is_current(record, patch)):
-            action = "요약 카드 보완 대상"
+            action = "기존 원문 수정 / 바뀐 항목만 카드로 전송 대상"
         else:
             action = "변경 없음"
         print(f"{patch.patch_id}: {action} / {patch.title}")

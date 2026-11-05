@@ -49,6 +49,10 @@ class DeliveryTests(unittest.TestCase):
 
     def legacy_record(self):
         record = monitor.make_record(self.patch, "sent")
+        # Simulate the resumable initial-card phase for transport retry tests.
+        # Completed deliveries and incremental revisions are tested separately.
+        record["initial_summary_pending"] = True
+        record["summary_source_lines"] = monitor.format_summary(self.patch)[4:]
         record["text_format_version"] = monitor.TEXT_FORMAT_VERSION
         # A tracked delivery has a Discord message ID. Historical sent records
         # without one are covered by a separate fail-closed test below.
@@ -96,23 +100,22 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.edit.call_count, 1)
         self.assertEqual(self.post.call_count, 1)
 
-    def test_card_version_upgrade_edits_existing_card_once_without_resending_text(self):
+    def test_card_version_upgrade_does_not_republish_completed_patch(self):
         record = self.legacy_record()
         record.update({
+            "initial_summary_pending": False,
             "discord_message_ids": ["text-1"],
             "summary_message_ids": ["card-1"],
             "summary_card_version": monitor.SUMMARY_CARD_VERSION - 1,
             "summary_body_hash": self.patch.body_hash,
         })
-        self.assertEqual(self.process(), "updated")
-        self.edit.assert_called_once()
-        self.assertIn("/messages/card-1", self.edit.call_args.args[0])
-        self.assertIn("files", self.edit.call_args.kwargs)
+        self.assertEqual(self.process(), "already_sent")
+        self.edit.assert_not_called()
         self.post.assert_not_called()
         self.payloads.assert_not_called()
         self.assertEqual(self.reload()["summary_card_version"], monitor.SUMMARY_CARD_VERSION)
         self.assertEqual(self.process(), "already_sent")
-        self.assertEqual(self.edit.call_count, 1)
+        self.assertEqual(self.edit.call_count, 0)
 
     def test_rate_limited_upload_retries_full_image_and_checkpoints_once(self):
         record = self.legacy_record()
