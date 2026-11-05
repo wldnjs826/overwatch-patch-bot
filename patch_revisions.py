@@ -80,7 +80,7 @@ def changed_entries(before, after, *, classify, role_from_heading, hero_roles):
         else:
             added.append(atom)
 
-    rows = []
+    rows, label_corrections = [], set()
     for atom in added:
         # Pair corrections only within one hero/mode/role; unrelated additions
         # and removals retain explicit labels rather than inventing a relation.
@@ -94,8 +94,15 @@ def changed_entries(before, after, *, classify, role_from_heading, hero_roles):
         category = classify(text, hero=atom["hero"], mode=atom["mode"])
         if atom["hero"] == "주요 변경":
             category = "review"
-        shown = (f"[수정] {text}\n이전 표기: {_display(previous)}" if previous
-                 else f"[추가] {text}")
+        if previous and previous["text"] == atom["text"] and previous["ability"] != atom["ability"]:
+            key = (atom["mode"], atom["role"], atom["hero"], previous["ability"], atom["ability"])
+            if key in label_corrections:
+                continue
+            label_corrections.add(key)
+            shown = f"[수정] 기술/특전 표기: {previous['ability']} → {atom['ability']}"
+        else:
+            shown = (f"[수정] {text}\n이전 표기: {_display(previous)}" if previous
+                     else f"[추가] {text}")
         rows.append((atom, category, shown))
     for atom in removed:
         # Deleting a patch-note sentence is not evidence of an in-game nerf.

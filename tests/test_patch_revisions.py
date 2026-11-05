@@ -54,7 +54,16 @@ class SourceDiffTests(unittest.TestCase):
         self.assertEqual(entries[0]["category"], "adjust")
         text = entries[0]["changes"][0]["text"]
         self.assertIn("음파 분열 - 보조 특전", text)
-        self.assertIn("이전 표기: 음파 분열 - 주요 특전", text)
+        self.assertIn("음파 분열 - 주요 특전 → 음파 분열 - 보조 특전", text)
+        self.assertNotIn("피해량", text)
+
+    def test_label_only_correction_is_not_repeated_for_each_unchanged_metric(self):
+        old = note(hero_lines("피해량 30 → 28", "재사용 대기시간 12초 → 10초", ability="음파 분열 - 주요 특전"))
+        new = note(hero_lines("피해량 30 → 28", "재사용 대기시간 12초 → 10초", ability="음파 분열 - 보조 특전"))
+        entries = diff(old, new)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(len(entries[0]["changes"]), 1)
+        self.assertNotIn("재사용", entries[0]["changes"][0]["text"])
 
     def test_additions_deletions_and_unknowns_keep_original_conditions(self):
         old = note(hero_lines("최대 3회 적중 시에만 기존 효과가 적용됩니다."))
