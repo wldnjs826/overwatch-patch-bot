@@ -39,7 +39,7 @@ def wrap_styled(text, spans, font, width):
         if start == len(text):
             break
         end, space = start, -1
-        while end < len(text) and font.getlength(text[start:end + 1]) <= width:
+        while end < len(text) and text[end] != "\n" and font.getlength(text[start:end + 1]) <= width:
             if text[end].isspace():
                 space = end
             end += 1

@@ -206,6 +206,62 @@ class RevisionDeliveryTests(unittest.TestCase):
         self.assertEqual([b["body_hash"] for b in self.record["revision_batches"]],
                          [self.new.body_hash, newest.body_hash])
 
+    def test_acknowledged_revision_page_is_reused_after_next_page_fails(self):
+        def two_pages(_note, directory, **kwargs):
+            paths = [Path(directory) / f"revision-{i}.png" for i in range(2)]
+            for path in paths:
+                path.write_bytes(b"mock image")
+            return paths
+        self.generator.side_effect = two_pages
+        self.post.side_effect = [self.response("first-delta"), requests.ConnectionError("second page failed")]
+        with self.assertRaises(requests.ConnectionError):
+            self.process()
+        self.state = monitor.load_state()
+        self.record = self.state["patches"][self.new.patch_id]
+        self.assertEqual(self.record["pending_revision"]["message_ids"], ["first-delta"])
+        self.edit.reset_mock()
+        self.edit.return_value = self.response("first-delta")
+        self.post.side_effect = self.upload
+        self.assertEqual(self.process(), "updated")
+        self.assertEqual(self.edit.call_count, 1)
+        self.assertIn("/messages/first-delta", self.edit.call_args.args[0])
+        self.assertEqual(len(self.posts), 1)
+        self.assertEqual(self.record["revision_batches"][0]["message_ids"], ["first-delta", "new-1"])
+        self.assertEqual(self.record["summary_message_ids"], ["old-card"])
+        self.delete.assert_not_called()
+
+    def test_interrupted_source_edit_resumes_before_any_revision_upload(self):
+        self.edit.side_effect = requests.ConnectionError("source edit interrupted")
+        with self.assertRaises(requests.ConnectionError):
+            self.process()
+        self.assertFalse(self.record["pending_revision"]["text_done"])
+        self.post.assert_not_called()
+        self.edit.side_effect = None
+        self.edit.return_value = self.response("original")
+        self.assertEqual(self.process(), "updated")
+        self.assertEqual(len(self.posts), 1)
+        self.delete.assert_not_called()
+
+    def test_first_delivery_is_full_and_later_delivery_is_incremental(self):
+        self.state["patches"].clear()
+        self.assertEqual(self.process(self.old), "sent")
+        record = self.state["patches"][self.old.patch_id]
+        original_ids = list(record["summary_message_ids"])
+        self.assertEqual(self.generated, [{}])
+        self.assertEqual(record["summary_source_lines"], monitor.format_summary(self.old)[4:])
+        self.assertEqual(self.process(), "updated")
+        self.assertEqual(record["summary_message_ids"], original_ids)
+        self.assertTrue(self.generated[-1]["revision"])
+        self.assertEqual(len(self.posts), 3)  # Original, full card, one revision card.
+
+    def test_legacy_recovery_preserves_numbered_multimessage_source(self):
+        old = note(hero_lines(*[f"조건 {n}: 공격력이 30에서 28로 감소했습니다. 방벽에는 적용되지 않습니다." for n in range(160)]))
+        payloads = monitor.decorate_payloads(monitor.build_discord_payloads(old))
+        self.assertGreater(len(payloads), 1)
+        self.get.side_effect = [self.response(content=item["content"]) for item in payloads]
+        recovered = monitor.read_delivered_source(self.webhook, [str(n) for n in range(len(payloads))])
+        self.assertEqual(recovered, monitor.format_summary(old)[4:])
+
     def test_reordering_only_updates_original_without_posting_any_cards(self):
         reordered = note(hero_lines("재사용 대기시간 12초 → 10초", "공격력 30 → 28"))
         self.assertEqual(self.process(reordered), "updated")

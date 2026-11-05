@@ -13,6 +13,13 @@ def entry(changes, hero="정크랫", category="adjust", role="공격", mode="일
 
 
 class CardLayoutTests(unittest.TestCase):
+    def test_revision_before_and_after_have_separate_measured_lines(self):
+        font = cards._fonts(monitor._find_font_path)["body"]
+        lines = cards.wrap_styled("[수정] 공격력 30 → 26\n이전 표기: 공격력 30 → 28", [], font, cards.TEXT_WIDTH)
+        self.assertEqual([line["text"] for line in lines],
+                         ["[수정] 공격력 30 → 26", "이전 표기: 공격력 30 → 28"])
+        self.assertTrue(all("\n" not in line["text"] for line in lines))
+
     def change(self, text, category="buff"):
         return {**compact_change(text), "category": category}
 

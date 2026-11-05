@@ -26,4 +26,4 @@
 - 실제 일반전 영웅별 기대 분류, 모드 분리, 개발자 설명 제외와 원문 보존을 테스트한다. 예시 PNG와 manifest도 이 fixture에서 생성한다.
 - `tests/test_free_classification.py`에서 공식 수치 사례, 문맥의 영웅·모드 격리, 부정문·단위 보호, UI 분리와 미분류 항목의 자동 발송·중복 방지를 검증한다. 실제 HTTP 호출은 차단한다.
 - `engineering-harness.md`에 따라 테스트와 렌더링은 격리된 GitHub Actions Ubuntu runner에서만 수행한다. 실제 Discord 요청은 mock 처리한다.
-- 현재 카드 버전은 6(`SUMMARY_CARD_VERSION`)이며 모드·유형·역할마다 카드를 분리하고 특전 변경은 조정으로 표시한다. 구버전 카드 갱신은 원문 메시지 ID가 있는 최신 패치에만 적용한다. 전송 완료(`sent`) 기록에 원문 메시지 ID가 없으면 자동 재전송과 요약 카드 추가를 차단한다. 429 응답은 [Discord 공식 문서](https://docs.discord.com/developers/topics/rate-limits)에 따라 서버 대기 시간을 따른 뒤 재시도한다. 확인된 메시지 ID와 상태를 유지한다.
+- 현재 카드 버전은 7이다. 새 패치의 최초 전송에만 전체 카드를 만들고, 이후에는 원문에서 바뀐 항목만 수정 사항 카드로 보낸다. 분류·디자인 버전만 바뀌면 기존 전체 카드를 다시 게시하지 않는다. 모드·유형·역할별 분리와 특전 조정 규칙은 유지한다. 전송 완료 기록에 원문 메시지 ID가 없으면 자동 재전송을 차단한다. 429 응답은 [Discord 공식 문서](https://docs.discord.com/developers/topics/rate-limits)에 따라 서버 대기 시간을 따르고 확인된 메시지 ID를 보존한다.

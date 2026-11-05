@@ -57,6 +57,10 @@ def _display(atom):
     return f"{prefix}: {atom['text']}" if prefix else atom["text"]
 
 
+def _ability_root(atom):
+    return re.sub(r"\s*[-–]\s*(?:주요|보조) 특전$", "", atom["ability"])
+
+
 def changed_entries(before, after, *, classify, role_from_heading, hero_roles):
     """Return only added/edited/deleted statements; reordering alone is silent."""
     old = source_atoms(before, role_from_heading, hero_roles)
@@ -82,7 +86,8 @@ def changed_entries(before, after, *, classify, role_from_heading, hero_roles):
         # and removals retain explicit labels rather than inventing a relation.
         candidates = [(SequenceMatcher(None, _display(prior), _display(atom)).ratio(), i)
                       for i, prior in enumerate(removed)
-                      if all(prior[k] == atom[k] for k in ("mode", "role", "hero"))]
+                      if all(prior[k] == atom[k] for k in ("mode", "role", "hero"))
+                      and _ability_root(prior) == _ability_root(atom)]
         score, index = max(candidates, default=(0, -1))
         previous = removed.pop(index) if score >= 0.55 else None
         text = _display(atom)
