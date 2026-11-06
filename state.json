@@ -2,7 +2,7 @@
   "title": "오버워치 2 패치 노트 - 2026년 8월 21일",
   "hash": "9128f551e9a94340b9829fcfd9477a466db5057866fec6953ee5e82fa3db7180",
   "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
-  "updated_at_utc": "2026-11-05T19:05:55.680356+00:00",
+  "updated_at_utc": "2026-11-06T00:08:54.681718+00:00",
   "parser": "monthly_all_patch_v1",
   "version": 8,
   "patches": {
@@ -1687,6 +1687,29 @@
         "- 벤데타의 팽창 강철이 의도한 것보다 팔라틴 팽 휘두르기 범위를 더 많이 증가시키던 문제를 수정했습니다.",
         "- 엘사카 제압기가 이제 D.Va에게 올바르게 적용됩니다."
       ]
+    },
+    "2026-11-05#01-blizzard": {
+      "patch_id": "2026-11-05#01-blizzard",
+      "date_key": "2026-11-05",
+      "same_day_index": 1,
+      "title": "Overwatch Retail Patch Notes – November 5, 2026",
+      "body_hash": "0d74caf0bc4a89b6a3bed582ae6ba90e4653b634ba14ef10736cfc0bfaf0e228",
+      "image_hash": "d34d1f3e553ac019eb7989497596562a03366cd1de2d1ea1a4eed266957a1d57",
+      "image_count": 2,
+      "signature_text": "hotfix update | this is a hotfix update replay codes from the november <n> patch are still available | hero updates | wrecking ball | grappling claw | base speed limit for wrecking ball while retracting grappling claw increased by <n> | allied speed boosts now increase the speed limit for wrecking ball while retracting grappling claw | bug fixes | general | players who did not reach checkpoint <n> in a previous competitive drive should no longer have a signature equipped which they cannot unequip | heroes | in a previous update fixed an issue where pilot d mon would be resurrected without ultimate charge thereby preventing d mon from immediately getting back into her mech | stadium | fixed an issue where the scoreboard and related screens would not display properly",
+      "source_identity": "0ee8d3ad4c44aca6579a97df4c6f5b278c0a0b51e0bfaac304d2992020a73836",
+      "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/11/",
+      "source_name": "blizzard",
+      "first_seen_source": "blizzard",
+      "status": "pending_korean",
+      "discord_message_ids": [],
+      "summary_message_ids": [],
+      "summary_card_version": 0,
+      "first_seen_utc": "2026-11-06T00:08:54.679458+00:00",
+      "last_seen_utc": "2026-11-06T00:08:54.679458+00:00",
+      "language_reason": "영문 또는 한국어 여부 불확실",
+      "pending_body_hash": "0d74caf0bc4a89b6a3bed582ae6ba90e4653b634ba14ef10736cfc0bfaf0e228",
+      "pending_image_hash": "d34d1f3e553ac019eb7989497596562a03366cd1de2d1ea1a4eed266957a1d57"
     }
   }
 }
