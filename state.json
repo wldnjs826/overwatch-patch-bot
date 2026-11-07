@@ -2,7 +2,7 @@
   "title": "오버워치 2 패치 노트 - 2026년 8월 21일",
   "hash": "9128f551e9a94340b9829fcfd9477a466db5057866fec6953ee5e82fa3db7180",
   "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
-  "updated_at_utc": "2026-11-07T00:26:38.171011+00:00",
+  "updated_at_utc": "2026-11-07T06:31:46.419259+00:00",
   "parser": "monthly_all_patch_v1",
   "version": 8,
   "patches": {
@@ -1710,6 +1710,53 @@
       "language_reason": "영문 또는 한국어 여부 불확실",
       "pending_body_hash": "0d74caf0bc4a89b6a3bed582ae6ba90e4653b634ba14ef10736cfc0bfaf0e228",
       "pending_image_hash": "d34d1f3e553ac019eb7989497596562a03366cd1de2d1ea1a4eed266957a1d57"
+    },
+    "2026-11-06#01-blizzard": {
+      "patch_id": "2026-11-06#01-blizzard",
+      "date_key": "2026-11-06",
+      "same_day_index": 1,
+      "title": "오버워치 패치 노트 - 2026년 11월 6일",
+      "body_hash": "7eede3454bfdc5447985ef33212cf6f3181e289b086757f02413fa3a9524aa3b",
+      "image_hash": "d34d1f3e553ac019eb7989497596562a03366cd1de2d1ea1a4eed266957a1d57",
+      "image_count": 2,
+      "signature_text": "핫픽스 업데이트 | 핫픽스 업데이트입니다 <n>월 <n>일 패치부터 생성된 리플레이 코드는 계속 이용할 수 있습니다 | 영웅 업데이트 | 레킹볼 | 갈고리 고정 | 갈고리 고정을 취소하는 동안 레킹볼의 기본 속도 제한이 <n> 증가했습니다 | 아군 속도 증폭이 이제 갈고리 고정을 취소하는 동안 레킹볼의 기본 속도 제한을 증가시킵니다 | 버그 수정 | 일반 | 이전 경쟁전 드라이브에서 체크포인트 <n>에 도달하지 않은 플레이어는 장착 해제할 수 없는 시그니처를 더 이상 장착하지 않습니다 | 영웅 | 이전 업데이트로 수정 완료됨 조종사 d mon이 궁극기 충전 없이 부활하여 d mon이 즉각적으로 메카에 탑승하지 못하곤 했던 문제를 수정했습니다 | 스타디움 | 점수판과 관련 화면이 제대로 표시되지 않던 문제를 수정했습니다",
+      "source_identity": "b529653bdeab3199c52d0b75ec678558037d8d25c51b0761f446ae973b30eaf5",
+      "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/11/",
+      "source_name": "blizzard",
+      "first_seen_source": "blizzard",
+      "status": "sent",
+      "discord_message_ids": [
+        "1568513250721792051"
+      ],
+      "summary_message_ids": [
+        "1568513266903293952"
+      ],
+      "summary_card_version": 8,
+      "first_seen_utc": "2026-11-07T06:31:40.442731+00:00",
+      "last_seen_utc": "2026-11-07T06:31:43.990333+00:00",
+      "text_format_version": 2,
+      "sent_at_utc": "2026-11-07T06:31:43.990349+00:00",
+      "last_edited_at_utc": "2026-11-07T06:31:43.990353+00:00",
+      "sent_source": "blizzard",
+      "summary_body_hash": "7eede3454bfdc5447985ef33212cf6f3181e289b086757f02413fa3a9524aa3b",
+      "summary_empty": false,
+      "language_reason": "한국어 본문으로 판별",
+      "summary_source_lines": [
+        "## 핫픽스 업데이트",
+        "핫픽스 업데이트입니다. 11월 4일 패치부터 생성된 리플레이 코드는 계속 이용할 수 있습니다.",
+        "## 영웅 업데이트",
+        "### 레킹볼",
+        "**갈고리 고정**",
+        "- 갈고리 고정을 취소하는 동안 레킹볼의 기본 속도 제한이 15% 증가했습니다.",
+        "- 아군 속도 증폭이 이제 갈고리 고정을 취소하는 동안 레킹볼의 기본 속도 제한을 증가시킵니다.",
+        "## 버그 수정",
+        "## 일반",
+        "- 이전 경쟁전 드라이브에서 체크포인트 4에 도달하지 않은 플레이어는 장착 해제할 수 없는 시그니처를 더 이상 장착하지 않습니다.",
+        "## 영웅",
+        "- 이전 업데이트로 수정 완료됨: 조종사 D.Mon이 궁극기 충전 없이 부활하여 D.Mon이 즉각적으로 메카에 탑승하지 못하곤 했던 문제를 수정했습니다.",
+        "## 스타디움",
+        "- 점수판과 관련 화면이 제대로 표시되지 않던 문제를 수정했습니다."
+      ]
     }
   }
 }
