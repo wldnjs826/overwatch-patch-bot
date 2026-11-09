@@ -143,6 +143,29 @@ class SourceStateTests(unittest.TestCase):
         self.assertEqual(monitor.process_patch(latest, self.state, self.webhook), "already_sent")
         self.sync.assert_called_once()
 
+    def test_nexon_hotfix_862_edits_the_verified_legacy_delivery(self):
+        blizzard = official_patch("blizzard")
+        blizzard.date_key = "2026-11-06"
+        blizzard.patch_id = "2026-11-06#01-blizzard"
+        blizzard.body_hash = "7eede3454bfdc5447985ef33212cf6f3181e289b086757f02413fa3a9524aa3b"
+        old = self.sent_record(blizzard)
+        old["summary_source_lines"] = monitor.format_summary(blizzard)[4:]
+        old["summary_message_ids"] = ["existing-card"]
+        nexon = official_patch(items=[*blizzard.items, ("p", "핫픽스 패치 안내입니다.")])
+        nexon.date_key = blizzard.date_key
+        nexon.patch_id = "2026-11-06#01"
+        nexon.source_url = f"{monitor.NEXON_LIST_URL}/862/patch-2026-11-05"
+
+        with patch.object(monitor, "send_summary_cards", return_value=[]) as revision:
+            self.assertEqual(monitor.process_patch(nexon, self.state, self.webhook), "updated")
+        self.assertEqual(self.sync.call_args.args[1], ["existing-text"])
+        self.assertIn(nexon.source_url, self.delivered_content())
+        self.assertEqual(self.state["patches"][nexon.patch_id]["summary_message_ids"], ["existing-card"])
+        revision.assert_called_once()
+        self.assertTrue(revision.call_args.kwargs["revision"])
+        self.cards.assert_not_called()
+        self.delete.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

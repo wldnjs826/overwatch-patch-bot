@@ -2499,6 +2499,15 @@ def find_cross_source_duplicate(patch: Patch, records: dict) -> tuple[str, dict]
     identity = source_identity(patch)
     if not identity:
         return None
+    # The Nov 6 hotfix was delivered before the source switch. Nexon's verified
+    # copy (862) uses slightly different wording for the same patch.
+    if nexon_article_id(patch.source_url) == 862 and patch.date_key == "2026-11-06":
+        legacy_id = "2026-11-06#01-blizzard"
+        legacy = records.get(legacy_id, {})
+        if (isinstance(legacy, dict) and legacy.get("status") == "sent"
+                and legacy.get("source_name") == "blizzard"
+                and legacy.get("body_hash") == "7eede3454bfdc5447985ef33212cf6f3181e289b086757f02413fa3a9524aa3b"):
+            return legacy_id, legacy
     for other_id, record in records.items():
         if (isinstance(record, dict) and record.get("status") == "sent"
                 and record.get("source_name") != patch.source_name
