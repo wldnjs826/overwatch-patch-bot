@@ -95,6 +95,16 @@ class NexonParsingTests(unittest.TestCase):
                 [LATEST_NEXON_URL],
             )
 
+    def test_known_issues_in_patch_category_are_excluded(self):
+        html = """
+        <a href="/news/patchnotes/859">알려진 현상</a>
+        <script id="__NUXT_DATA__">[{"newsNo":1,"categoryId":2,"title":3},
+        859,2,"2026: 5시즌 알려진 현상 안내",{"newsNo":5,"categoryId":2,"title":6},
+        858,"오버워치 패치노트 - 2026년 11월 4일"]</script>
+        """
+        self.assertEqual(monitor.extract_nexon_article_links(html),
+                         [f"{monitor.NEXON_LIST_URL}/858"])
+
     def test_latest_from_alternate_listing_uses_verified_numeric_route(self):
         numeric_url = f"{monitor.NEXON_LIST_URL}/862"
         responses = {

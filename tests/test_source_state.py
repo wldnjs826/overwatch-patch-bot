@@ -126,6 +126,23 @@ class SourceStateTests(unittest.TestCase):
         self.assertEqual(monitor.process_patch(nexon, self.state, self.webhook), "already_sent")
         self.assertEqual(self.sync.call_count, 1)
 
+    def test_same_day_article_keeps_its_message_ids_when_list_order_changes(self):
+        older = official_patch(value=200)
+        original = copy.deepcopy(self.sent_record(older))
+        latest = official_patch(value=225)
+        latest.source_url = f"{monitor.NEXON_LIST_URL}/831/newer"
+
+        # Only the newest article was readable, so both were assigned #01.
+        self.assertEqual(latest.patch_id, older.patch_id)
+        self.assertEqual(monitor.process_patch(latest, self.state, self.webhook), "sent")
+        self.assertEqual(self.state["patches"][older.patch_id], original)
+        self.assertEqual(self.sync.call_args.args[1], [])
+
+        # When both articles are readable, #02 must reuse the new message.
+        latest.patch_id = latest.date_key + "#02"
+        self.assertEqual(monitor.process_patch(latest, self.state, self.webhook), "already_sent")
+        self.sync.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

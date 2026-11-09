@@ -298,7 +298,7 @@ def is_patch_title(text: str) -> bool:
     lowered = text.lower()
 
     return (
-        ("패치 노트" in text or "patch notes" in lowered)
+        ("패치노트" in re.sub(r"\s+", "", text) or "patch notes" in lowered)
         and bool(extract_date_key(text))
     )
 
@@ -808,7 +808,7 @@ def nexon_payload_articles(soup: BeautifulSoup) -> list[dict]:
             continue
         article = {
             key: scalar(entry.get(key))
-            for key in ("newsNo", "categoryId", "slug")
+            for key in ("newsNo", "categoryId", "slug", "title")
         }
         if (
             article["categoryId"] == 2
@@ -829,12 +829,17 @@ def nexon_article_id(url: str) -> int:
 
 def extract_nexon_article_links(*list_pages: str) -> list[str]:
     links: dict[int, str] = {}
+    non_patch_ids: set[int] = set()
     for html in list_pages:
         soup = BeautifulSoup(html, "html.parser")
         # Nuxt also embeds featured articles, so table order can differ from
         # publication order. Category 2 limits the all-news page to patch notes.
         for article in nexon_payload_articles(soup):
             article_id = article["newsNo"]
+            title = article["title"]
+            if isinstance(title, str) and title.strip() and not is_patch_title(title):
+                non_patch_ids.add(article_id)
+                continue
             slug = article["slug"]
             base_url = f"{NEXON_LIST_URL}/{article_id}"
             if isinstance(slug, str) and slug.strip():
@@ -848,7 +853,8 @@ def extract_nexon_article_links(*list_pages: str) -> list[str]:
             if article_id := nexon_article_id(url):
                 links.setdefault(article_id, url)
 
-    return [links[article_id] for article_id in sorted(links, reverse=True)[:NEXON_MAX_ARTICLES]]
+    patch_ids = sorted(links.keys() - non_patch_ids, reverse=True)
+    return [links[article_id] for article_id in patch_ids[:NEXON_MAX_ARTICLES]]
 
 
 def find_patch_title_node(
@@ -2503,6 +2509,24 @@ def find_cross_source_duplicate(patch: Patch, records: dict) -> tuple[str, dict]
     return None
 
 
+def resolve_nexon_patch_id(patch: Patch, records: dict) -> str:
+    """Keep Discord IDs associated with their article if same-day ordering shifts."""
+    article_id = nexon_article_id(patch.source_url)
+    if not article_id:
+        return patch.patch_id
+    for key, record in records.items():
+        if (isinstance(record, dict) and record.get("source_name") == "nexon"
+                and nexon_article_id(record.get("source_url") or "") == article_id):
+            return key
+
+    current = records.get(patch.patch_id) or {}
+    if (isinstance(current, dict) and current.get("source_name") == "nexon"
+            and (other_id := nexon_article_id(current.get("source_url") or ""))
+            and other_id != article_id):
+        return f"{patch.patch_id}-nexon-{article_id}"
+    return patch.patch_id
+
+
 # ============================================================
 # 패치 처리
 # ============================================================
@@ -2611,6 +2635,7 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
     if patch.source_name != "nexon":
         raise ValueError("Discord 전송 대상은 넥슨 패치노트만 가능합니다.")
     records = state.setdefault("patches", {})
+    patch = replace(patch, patch_id=resolve_nexon_patch_id(patch, records))
     record = records.get(patch.patch_id)
     identity = source_identity(patch)
     if record and record.get("status") == "duplicate_source":
@@ -2759,7 +2784,8 @@ def preview_patches(patches: list[Patch], state: dict) -> None:
     print("\n===== DRY_RUN: Discord 전송 및 state.json 저장 없음 =====")
     records = state.get("patches", {})
     for patch in patches:
-        record = records.get(patch.patch_id, {})
+        patch_id = resolve_nexon_patch_id(patch, records)
+        record = records.get(patch_id, {})
         if not check_korean_patch(patch.items).is_korean:
             action = "한국어 대기"
         elif record.get("status") == "duplicate_source" or (
@@ -2780,7 +2806,7 @@ def preview_patches(patches: list[Patch], state: dict) -> None:
             action = "기존 원문 수정 / 바뀐 항목만 카드로 전송 대상"
         else:
             action = "변경 없음"
-        print(f"{patch.patch_id}: {action} / {patch.title}")
+        print(f"{patch_id}: {action} / {patch.title}")
 
 
 # ============================================================
@@ -2809,7 +2835,7 @@ def nexon_list_is_stale(patch: Patch, state: dict) -> bool:
     if not article_id:
         return False
     for record in state.get("patches", {}).values():
-        if record.get("source_name") != "nexon":
+        if not isinstance(record, dict) or record.get("source_name") != "nexon":
             continue
         previous_id = nexon_article_id(record.get("source_url") or "")
         if previous_id and previous_id != article_id:
