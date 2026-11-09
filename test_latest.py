@@ -15,24 +15,17 @@ def main() -> int:
 
     try:
         patches = monitor.fetch_recent_patches()
-    except (RuntimeError, Exception) as exc:
+    except Exception as exc:
         print(f"패치 확인 실패: {exc}", file=sys.stderr)
         return 1
 
-    korean_patches = [
-        patch
-        for patch in patches
-        if monitor.check_korean_patch(patch.items).is_korean
-    ]
+    latest = monitor.select_delivery_patches(patches)
 
-    if not korean_patches:
-        print("테스트 전송할 한국어 패치를 찾지 못했습니다.", file=sys.stderr)
+    if not latest or not monitor.check_korean_patch(latest[0].items).is_korean:
+        print("최신 넥슨 공지의 한국어 본문을 확인하지 못했습니다.", file=sys.stderr)
         return 1
 
-    patch = max(
-        korean_patches,
-        key=lambda item: (item.date_key, item.same_day_index),
-    )
+    patch = latest[0]
 
     print("===== 테스트 전송 =====")
     print(f"선택된 패치: {patch.patch_id} / {patch.title}")

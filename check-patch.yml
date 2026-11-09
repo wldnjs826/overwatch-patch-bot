@@ -3,7 +3,7 @@ name: Overwatch patch monitor
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7,22,37,52 * * * *"
+    - cron: "2-57/5 * * * *"
 
 permissions:
   contents: write
@@ -39,7 +39,6 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           SEND_ON_FIRST_RUN: "true"
-          MONTH_LOOKBACK: "4"
           NEXON_MAX_ARTICLES: "20"
           # Defense in depth: monitor.py also hard-locks delivery to newest only.
           LATEST_PATCH_ONLY: "true"

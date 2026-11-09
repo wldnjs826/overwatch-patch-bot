@@ -10,6 +10,7 @@ import time
 import tempfile
 from collections import Counter
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,11 +28,9 @@ from patch_revisions import changed_entries
 # 기본 설정
 # ============================================================
 
-# 1순위: 넥슨 한국 공식 패치노트
 NEXON_LIST_URL = "https://overwatch.nexon.com/news/patchnotes"
-
-# 2순위: Blizzard 한국 공식 패치노트
-BLIZZARD_BASE_URL = "https://overwatch.blizzard.com/ko-kr/news/patch-notes/"
+NEXON_NEWS_URL = "https://overwatch.nexon.com/news"
+NEXON_HOST = urlsplit(NEXON_LIST_URL).netloc
 
 STATE_FILE = Path("state.json")
 
@@ -45,9 +44,6 @@ SEND_ON_FIRST_RUN = os.getenv("SEND_ON_FIRST_RUN", "true").lower() == "true"
 
 # 넥슨 목록에서 최근 게시물 몇 개를 상세 확인할지
 NEXON_MAX_ARTICLES = int(os.getenv("NEXON_MAX_ARTICLES", "20"))
-
-# Blizzard는 현재 달 + 이전 몇 개월을 볼지
-MONTH_LOOKBACK = int(os.getenv("MONTH_LOOKBACK", "4"))
 
 # Discord 한 메시지의 Embed 최대 개수
 DISCORD_EMBEDS_PER_MESSAGE = 10
@@ -223,7 +219,7 @@ IMAGE_TEXT_RE = re.compile(
 )
 
 NEXON_ARTICLE_HREF_RE = re.compile(
-    r"^/news/patchnotes/\d+(?:/|$)"
+    r"^/news/patchnotes/([1-9][0-9]*)(?:/[^/]+)?/?$"
 )
 
 
@@ -268,8 +264,8 @@ def fetch_html(url: str) -> str:
     response = requests.get(
         url,
         headers=REQUEST_HEADERS,
-        timeout=30,
-        allow_redirects=True,
+        timeout=(5, 10),
+        allow_redirects=False,
     )
 
     print(
@@ -278,6 +274,8 @@ def fetch_html(url: str) -> str:
     )
 
     response.raise_for_status()
+    if response.status_code != 200:
+        raise RuntimeError(f"넥슨 페이지가 HTTP {response.status_code}를 반환했습니다: {url}")
     return response.text
 
 
@@ -309,25 +307,6 @@ def heading_level(tag_name: str) -> int | None:
     if re.fullmatch(r"h[1-6]", tag_name):
         return int(tag_name[1])
     return None
-
-
-def shift_month(year: int, month: int, offset: int) -> tuple[int, int]:
-    index = year * 12 + (month - 1) + offset
-    return index // 12, index % 12 + 1
-
-
-def candidate_blizzard_urls() -> list[str]:
-    now = datetime.now(timezone.utc)
-    urls: list[str] = []
-
-    for offset in range(0, -MONTH_LOOKBACK, -1):
-        year, month = shift_month(now.year, now.month, offset)
-
-        urls.append(
-            f"{BLIZZARD_BASE_URL}live/{year}/{month:02d}/"
-        )
-
-    return urls
 
 
 def is_descendant_of(
@@ -798,7 +777,7 @@ def describe_language(
 
 
 # ============================================================
-# 넥슨 1순위 소스
+# 넥슨 공식 소스
 # ============================================================
 
 def nexon_payload_articles(soup: BeautifulSoup) -> list[dict]:
@@ -840,51 +819,36 @@ def nexon_payload_articles(soup: BeautifulSoup) -> list[dict]:
     return articles
 
 
-def extract_nexon_article_links(
-    list_html: str,
-) -> list[str]:
-    soup = BeautifulSoup(
-        list_html,
-        "html.parser",
-    )
+def nexon_article_id(url: str) -> int:
+    parts = urlsplit(url)
+    match = NEXON_ARTICLE_HREF_RE.fullmatch(parts.path)
+    if parts.scheme == "https" and parts.netloc == NEXON_HOST and match:
+        return int(match[1])
+    return 0
 
-    links: list[str] = []
-    seen: set[str] = set()
 
-    def add_link(href: str) -> None:
-        parts = urlsplit(urljoin(NEXON_LIST_URL, href))
-        if parts.netloc != urlsplit(NEXON_LIST_URL).netloc:
-            return
-        if not NEXON_ARTICLE_HREF_RE.search(parts.path):
-            return
-        # Numeric and slug routes can both point to the same article.
-        article_id = parts.path.split("/")[3]
-        if article_id not in seen and len(links) < NEXON_MAX_ARTICLES:
-            seen.add(article_id)
-            links.append(urlunsplit((parts.scheme, parts.netloc, parts.path, "", "")))
+def extract_nexon_article_links(*list_pages: str) -> list[str]:
+    links: dict[int, str] = {}
+    for html in list_pages:
+        soup = BeautifulSoup(html, "html.parser")
+        # Nuxt also embeds featured articles, so table order can differ from
+        # publication order. Category 2 limits the all-news page to patch notes.
+        for article in nexon_payload_articles(soup):
+            article_id = article["newsNo"]
+            slug = article["slug"]
+            base_url = f"{NEXON_LIST_URL}/{article_id}"
+            if isinstance(slug, str) and slug.strip():
+                links[article_id] = f"{base_url}/{quote(slug, safe='')}"
+            else:
+                links.setdefault(article_id, base_url)
 
-    for anchor in soup.find_all(
-        "a",
-        href=True,
-    ):
-        href = str(
-            anchor.get(
-                "href",
-                "",
-            )
-        ).strip()
+        for anchor in soup.find_all("a", href=True):
+            parts = urlsplit(urljoin(NEXON_LIST_URL, anchor["href"].strip()))
+            url = urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/"), "", ""))
+            if article_id := nexon_article_id(url):
+                links.setdefault(article_id, url)
 
-        add_link(href)
-
-    # Current list cards are clickable divs. Their routes live in the hydration
-    # table alongside unrelated news and events, which categoryId filters out.
-    for article in nexon_payload_articles(soup):
-        href = f"/news/patchnotes/{article['newsNo']}"
-        if isinstance(article["slug"], str) and article["slug"]:
-            href += "/" + quote(article["slug"], safe="")
-        add_link(href)
-
-    return links
+    return [links[article_id] for article_id in sorted(links, reverse=True)[:NEXON_MAX_ARTICLES]]
 
 
 def find_patch_title_node(
@@ -1182,413 +1146,45 @@ def parse_nexon_article(
     }
 
 
+def try_nexon_page(url: str) -> str:
+    try:
+        return fetch_html(url)
+    except (requests.RequestException, RuntimeError) as exc:
+        print(f"[NEXON] 페이지 확인 실패: {url} / {exc}")
+        return ""
+
+
+def fetch_nexon_article(url: str) -> dict | None:
+    numeric_url = f"{NEXON_LIST_URL}/{nexon_article_id(url)}"
+    for route in dict.fromkeys((url, numeric_url)):
+        html = try_nexon_page(route)
+        if html and (article := parse_nexon_article(html, route)):
+            return article
+        print(f"[NEXON] 본문 확인 실패: {route}")
+    return None
+
+
 def fetch_nexon_patches() -> list[Patch]:
-    print(
-        "\n===== 1순위: 넥슨 공식 패치노트 확인 ====="
+    print("\n===== 넥슨 공식 패치노트 확인 =====")
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        # The two public lists can expose different versions of the latest posts.
+        pages = list(pool.map(try_nexon_page, (NEXON_NEWS_URL, NEXON_LIST_URL)))
+        links = extract_nexon_article_links(*pages)
+        if not links:
+            raise RuntimeError("넥슨 목록에서 패치노트 링크를 찾지 못했습니다.")
+        print(f"넥슨 최근 게시물 링크 {len(links)}개 확인 / 최신 번호 {nexon_article_id(links[0])}")
+        articles = list(pool.map(fetch_nexon_article, links))
+
+    if articles[0] is None:
+        raise RuntimeError(f"최신 넥슨 패치 본문을 확인하지 못했습니다: {links[0]}")
+
+    raw_patches = [article for article in articles if article is not None]
+    raw_patches.sort(
+        key=lambda article: (article["date_key"], nexon_article_id(article["source_url"])),
+        reverse=True,
     )
+    return assign_patch_ids(raw_patches)
 
-    list_html = fetch_html(
-        NEXON_LIST_URL
-    )
-
-    links = extract_nexon_article_links(
-        list_html
-    )
-
-    if not links:
-        raise RuntimeError(
-            "넥슨 패치노트 목록에서 게시물 링크를 찾지 못했습니다."
-        )
-
-    print(
-        f"넥슨 최근 게시물 링크 {len(links)}개 확인"
-    )
-
-    raw_patches: list[dict] = []
-
-    for index, url in enumerate(
-        links,
-        start=1,
-    ):
-        try:
-            html = fetch_html(
-                url
-            )
-
-            raw = parse_nexon_article(
-                html,
-                url,
-            )
-
-            if raw is None:
-                print(
-                    f"[NEXON {index}] 패치 본문 파싱 실패 → 건너뜀"
-                )
-
-                continue
-
-            print(
-                f"[NEXON {index}] {raw['title']} "
-                f"/ 이미지 {len(raw.get('images', []))}장"
-            )
-
-            raw_patches.append(
-                raw
-            )
-
-        except requests.RequestException as exc:
-            print(
-                f"[NEXON {index}] 요청 실패: {exc}"
-            )
-
-    if not raw_patches:
-        raise RuntimeError(
-            "넥슨에서 파싱 가능한 패치노트를 찾지 못했습니다."
-        )
-
-    return assign_patch_ids(
-        raw_patches
-    )
-
-
-# ============================================================
-# Blizzard 2순위 소스
-# ============================================================
-
-def parse_blizzard_page(
-    html: str,
-    source_url: str,
-) -> list[dict]:
-    soup = BeautifulSoup(
-        html,
-        "html.parser",
-    )
-
-    area = (
-        soup.find("main")
-        or soup
-    )
-
-    title_nodes: list[Tag] = []
-
-    for tag in area.find_all(
-        [
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-        ]
-    ):
-        text = clean_text(
-            tag.get_text(
-                " ",
-                strip=True,
-            )
-        )
-
-        if is_patch_title(
-            text
-        ):
-            title_nodes.append(
-                tag
-            )
-
-    raw_patches: list[dict] = []
-
-    for title_node in title_nodes:
-        title = clean_text(
-            title_node.get_text(
-                " ",
-                strip=True,
-            )
-        )
-
-        date_key = extract_date_key(
-            title
-        )
-
-        if not date_key:
-            continue
-
-        title_level = (
-            heading_level(
-                title_node.name
-            )
-            or 3
-        )
-
-        items: list[
-            tuple[str, str]
-        ] = []
-
-        images: list[str] = []
-        raw_seen: list[str] = []
-
-        for node in title_node.find_all_next(
-            [
-                "h1",
-                "h2",
-                "h3",
-                "h4",
-                "h5",
-                "h6",
-                "p",
-                "li",
-                "img",
-                "div",
-            ]
-        ):
-            if node is title_node:
-                continue
-
-            if not is_descendant_of(
-                node,
-                area,
-            ):
-                break
-
-            tag_name = node.name
-            if tag_name == "div":
-                if "PatchNotesAbilityUpdate-name" in node.get("class", []):
-                    tag_name = "h6"
-                elif "PatchNotesGeneralUpdate-title" in node.get("class", []):
-                    tag_name = "section"
-                else:
-                    continue
-            if tag_name == "p" and node.find_parent("li") is not None:
-                continue
-
-            if node.name == "img":
-                image_url = extract_image_url(
-                    node,
-                    source_url,
-                )
-
-                if image_url:
-                    images.append(
-                        image_url
-                    )
-
-                continue
-
-            text_node = node
-            if node.name == "li" and node.find(["ul", "ol"]) is not None:
-                text_node = BeautifulSoup(str(node), "html.parser")
-                for nested_list in text_node.find_all(["ul", "ol"]):
-                    nested_list.decompose()
-            text = clean_text(
-                text_node.get_text(
-                    " ",
-                    strip=True,
-                )
-            )
-
-            if not text:
-                continue
-
-            if is_patch_title(
-                text
-            ):
-                break
-
-            current_level = heading_level(
-                node.name
-            )
-
-            if (
-                current_level is not None
-                and current_level < title_level
-            ):
-                break
-
-            lowered = text.lower()
-
-            if text in {
-                "위로 이동",
-                "Top",
-                "Top of post",
-                "Back to top",
-                "패치 노트의 처음으로 돌아가기",
-            }:
-                continue
-
-            if (
-                "general discussion forum"
-                in lowered
-            ):
-                break
-
-            if (
-                "bug report forum"
-                in lowered
-            ):
-                break
-
-            if (
-                "기술 지원 토론장"
-                in text
-                or "버그 제보 토론장"
-                in text
-            ):
-                break
-
-            if (
-                text
-                in {
-                    "패치 노트",
-                    "Live Patch Notes",
-                }
-                and items
-            ):
-                break
-
-            if IMAGE_TEXT_RE.fullmatch(
-                text
-            ):
-                continue
-
-            if (
-                raw_seen
-                and raw_seen[-1] == text
-            ):
-                continue
-
-            raw_seen.append(
-                text
-            )
-
-            items.append(
-                (
-                    "developer" if is_developer_note(node) else tag_name,
-                    text,
-                )
-            )
-
-        if not items:
-            continue
-
-        images = dedupe_images(
-            images
-        )
-
-        raw_patches.append(
-            {
-                "title": title,
-                "date_key": date_key,
-                "items": items,
-                "images": images,
-                "body_hash": build_body_hash(
-                    title,
-                    items,
-                ),
-                "source_url": source_url,
-                "source_name": "blizzard",
-            }
-        )
-
-    return raw_patches
-
-
-def fetch_blizzard_patches() -> list[Patch]:
-    print(
-        "\n===== 2순위: Blizzard 한국 패치노트 확인 ====="
-    )
-
-    raw_all: list[dict] = []
-    seen_raw: set[
-        tuple[str, str]
-    ] = set()
-
-    errors: list[str] = []
-
-    for url in candidate_blizzard_urls():
-        try:
-            html = fetch_html(
-                url
-            )
-
-            raws = parse_blizzard_page(
-                html,
-                url,
-            )
-
-            print(
-                f"Blizzard 패치 블록 {len(raws)}개: {url}"
-            )
-
-            for raw in raws:
-                dedupe_key = (
-                    raw["title"],
-                    raw["body_hash"],
-                )
-
-                if (
-                    dedupe_key
-                    in seen_raw
-                ):
-                    continue
-
-                seen_raw.add(
-                    dedupe_key
-                )
-
-                raw_all.append(
-                    raw
-                )
-
-        except requests.RequestException as exc:
-            errors.append(
-                f"{url}: {exc}"
-            )
-
-            print(
-                f"Blizzard 요청 실패: {url}: {exc}"
-            )
-
-    if not raw_all:
-        try:
-            html = fetch_html(
-                BLIZZARD_BASE_URL
-            )
-
-            raw_all.extend(
-                parse_blizzard_page(
-                    html,
-                    BLIZZARD_BASE_URL,
-                )
-            )
-
-        except requests.RequestException as exc:
-            errors.append(
-                f"{BLIZZARD_BASE_URL}: {exc}"
-            )
-
-    if not raw_all:
-        raise RuntimeError(
-            "Blizzard 패치노트를 찾지 못했습니다.\n"
-            + "\n".join(
-                errors
-            )
-        )
-
-    patches = assign_patch_ids(
-        raw_all
-    )
-
-    for patch in patches:
-        print(
-            f"[BLIZZARD] {patch.patch_id} "
-            f"/ 이미지 {len(patch.images)}장"
-        )
-
-    return patches
-
-
-# ============================================================
-# 두 소스 중복 제거
-# ============================================================
 
 def source_identity(patch: Patch) -> str:
     """Exact substantive content; keep numbers, units and conditions for matching."""
@@ -1609,84 +1205,10 @@ def inherit_explicit_roles(patches: list[Patch]) -> None:
         patch.hero_roles = dict(roles)
 
 
-def choose_patches(nexon_patches: list[Patch], blizzard_patches: list[Patch]) -> list[Patch]:
-    """Prefer confirmed identical Nexon articles; retain unmatched Blizzard posts."""
-    inherit_explicit_roles(nexon_patches + blizzard_patches)
-    confirmed = {(p.date_key, source_identity(p)) for p in nexon_patches if source_identity(p)}
-    selected = list(nexon_patches)
-    for patch in blizzard_patches:
-        if (patch.date_key, source_identity(patch)) in confirmed:
-            print(f"[동일 본문 확인 → 넥슨 우선] {patch.patch_id}")
-            continue
-        # IDs must stay stable even when Nexon is temporarily unavailable.
-        if not patch.patch_id.endswith("-blizzard"):
-            patch.patch_id += "-blizzard"
-        selected.append(patch)
-    return sorted(selected, key=lambda p: (p.date_key, p.same_day_index))
-
-
 def fetch_recent_patches() -> list[Patch]:
-    nexon_patches: list[Patch] = []
-    blizzard_patches: list[Patch] = []
-
-    nexon_error: Exception | None = None
-    blizzard_error: Exception | None = None
-
-    try:
-        nexon_patches = fetch_nexon_patches()
-
-    except (
-        requests.RequestException,
-        RuntimeError,
-    ) as exc:
-        nexon_error = exc
-
-        print(
-            f"넥슨 소스 실패: {exc}"
-        )
-
-    try:
-        blizzard_patches = fetch_blizzard_patches()
-
-    except (
-        requests.RequestException,
-        RuntimeError,
-    ) as exc:
-        blizzard_error = exc
-
-        print(
-            f"Blizzard 소스 실패: {exc}"
-        )
-
-    if (
-        not nexon_patches
-        and not blizzard_patches
-    ):
-        raise RuntimeError(
-            "넥슨과 Blizzard 두 소스 모두 패치 확인에 실패했습니다.\n"
-            f"NEXON: {nexon_error}\n"
-            f"BLIZZARD: {blizzard_error}"
-        )
-
-    patches = choose_patches(
-        nexon_patches,
-        blizzard_patches,
-    )
-
-    print(
-        f"\n최종 추적 대상 패치: {len(patches)}개"
-    )
-
-    for patch in patches:
-        print(
-            f"  - [{patch.source_name.upper()}] "
-            f"{patch.patch_id} "
-            f"/ 이미지 {len(patch.images)}장 "
-            f"/ {patch.title}"
-        )
-
+    patches = fetch_nexon_patches()
+    inherit_explicit_roles(patches)
     return patches
-
 
 
 # ============================================================
@@ -2963,34 +2485,8 @@ def update_seen_record(
 
 
 # ============================================================
-# NEXON ↔ BLIZZARD 추가 중복 안전장치
+# 기존 출처에서 보낸 원문 이력 확인
 # ============================================================
-
-def date_distance_days(
-    left: str,
-    right: str,
-) -> int:
-    try:
-        left_dt = datetime.strptime(
-            left,
-            "%Y-%m-%d",
-        )
-
-        right_dt = datetime.strptime(
-            right,
-            "%Y-%m-%d",
-        )
-
-        return abs(
-            (
-                left_dt
-                - right_dt
-            ).days
-        )
-
-    except ValueError:
-        return 999
-
 
 def find_cross_source_duplicate(patch: Patch, records: dict) -> tuple[str, dict] | None:
     # Never use the old number-stripped fuzzy signature to equate different patches.
@@ -3112,32 +2608,14 @@ def process_tracked_revision(patch: Patch, record: dict, state: dict, webhook_ur
 
 
 def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
+    if patch.source_name != "nexon":
+        raise ValueError("Discord 전송 대상은 넥슨 패치노트만 가능합니다.")
     records = state.setdefault("patches", {})
     record = records.get(patch.patch_id)
     identity = source_identity(patch)
-    if record is None and patch.source_name == "blizzard":
-        legacy_id = patch.patch_id.removesuffix("-blizzard")
-        legacy = records.get(legacy_id, {})
-        if (legacy_id != patch.patch_id and legacy.get("source_name") == "blizzard"
-                and (legacy.get("source_identity") == identity
-                     or legacy.get("body_hash") == patch.body_hash)):
-            record = {**legacy, "patch_id": patch.patch_id}
-            records[patch.patch_id] = record
-            records[legacy_id] = {**legacy, "status": "duplicate_source",
-                                  "duplicate_of": patch.patch_id}
     if record and record.get("status") == "duplicate_source":
-        target = records.get(record.get("duplicate_of"), {})
-        confirmed_nexon = (target.get("status") == "sent"
-                           and target.get("source_name") == "nexon"
-                           and target.get("date_key") == patch.date_key
-                           and target.get("source_identity") == identity)
-        if not (confirmed_nexon and patch.source_name == "blizzard"):
-            # Re-evaluate old fuzzy duplicate decisions; they could hide changed values.
-            record = None
-    if (record and record.get("status") != "duplicate_source"
-            and record.get("source_name") != patch.source_name
-            and record.get("source_identity") != identity
-            and record.get("body_hash") != patch.body_hash):
+        record = None
+    if record and record.get("source_name") != patch.source_name:
         # A legacy date-only key must not let a different source overwrite a patch.
         preserved_id = patch.patch_id + "-" + str(record.get("source_name", "legacy"))
         if preserved_id in records:
@@ -3152,23 +2630,15 @@ def process_patch(patch: Patch, state: dict, webhook_url: str) -> str:
         duplicate = find_cross_source_duplicate(patch, records)
         if duplicate is not None:
             original_id, original = duplicate
-            if patch.source_name == "nexon":
-                # Transfer the confirmed same patch's message IDs, then edit its link.
-                record = {**original, "patch_id": patch.patch_id,
-                          "date_key": patch.date_key, "same_day_index": patch.same_day_index}
-                records[patch.patch_id] = record
-                records[original_id] = {**original, "status": "duplicate_source",
-                                       "duplicate_of": patch.patch_id}
-            else:
-                record = make_record(patch, "duplicate_source")
-                record["duplicate_of"] = original_id
-                records[patch.patch_id] = record
-                print(f"다른 공식 소스에서 전송한 패치 → 중복 제외 ({original_id})")
-                return "duplicate_source"
-
-    if record and record.get("status") == "duplicate_source":
-        update_seen_record(record, patch)
-        return "duplicate_source"
+            # Reuse confirmed message IDs without resuming a legacy source's send.
+            record = {**original, "patch_id": patch.patch_id,
+                      "date_key": patch.date_key, "same_day_index": patch.same_day_index,
+                      "source_name": patch.source_name}
+            record.pop("pending_revision", None)
+            record.pop("initial_summary_pending", None)
+            records[patch.patch_id] = record
+            records[original_id] = {**original, "status": "duplicate_source",
+                                   "duplicate_of": patch.patch_id}
 
     was_sent = bool(record and record.get("status") == "sent")
     if not language.is_korean:
@@ -3324,18 +2794,28 @@ def select_delivery_patches(patches: list[Patch], latest_only: bool = True) -> l
     The latest_only argument is kept only for compatibility with existing tests
     and callers. Passing False can no longer unlock historical bulk delivery.
 
-    If Nexon and Blizzard both expose the newest date, prefer Nexon so the same
-    patch is not emitted twice from two official sources.
+    Archived records from other sources are never eligible for delivery.
     """
-    if not patches:
-        return []
+    newest = max(
+        (patch for patch in patches if patch.source_name == "nexon"),
+        key=lambda patch: (patch.date_key, patch.same_day_index),
+        default=None,
+    )
+    return [newest] if newest is not None else []
 
-    latest_date = max(patch.date_key for patch in patches)
-    same_date = [patch for patch in patches if patch.date_key == latest_date]
-    nexon = [patch for patch in same_date if patch.source_name == "nexon"]
-    pool = nexon or same_date
 
-    return [max(pool, key=lambda patch: patch.same_day_index)]
+def nexon_list_is_stale(patch: Patch, state: dict) -> bool:
+    article_id = nexon_article_id(patch.source_url)
+    if not article_id:
+        return False
+    for record in state.get("patches", {}).values():
+        if record.get("source_name") != "nexon":
+            continue
+        previous_id = nexon_article_id(record.get("source_url") or "")
+        if previous_id and previous_id != article_id:
+            if (record.get("date_key") or "", previous_id) > (patch.date_key, article_id):
+                return True
+    return False
 
 
 def main() -> int:
@@ -3381,6 +2861,9 @@ def main() -> int:
         )
 
     state = load_state()
+    if delivery_patches and nexon_list_is_stale(delivery_patches[0], state):
+        print("이미 확인한 넥슨 공지보다 오래된 목록 응답 → 다음 실행에서 재확인", file=sys.stderr)
+        return 1
     if dry_run:
         preview_patches(delivery_patches, state)
         return 0
@@ -3409,7 +2892,6 @@ def main() -> int:
     pending_count = 0
     already_count = 0
     skipped_update_count = 0
-    duplicate_count = 0
 
     try:
         for patch in delivery_patches:
@@ -3450,13 +2932,6 @@ def main() -> int:
                     state
                 )
 
-            elif result == "duplicate_source":
-                duplicate_count += 1
-
-                save_state(
-                    state
-                )
-
     except (
         requests.RequestException,
         RuntimeError,
@@ -3490,10 +2965,6 @@ def main() -> int:
 
     print(
         f"이미 전송됨: {already_count}"
-    )
-
-    print(
-        f"NEXON/BLIZZARD 중복 차단: {duplicate_count}"
     )
 
     print(

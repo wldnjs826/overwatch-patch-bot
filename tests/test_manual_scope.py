@@ -129,6 +129,18 @@ class ManualScopeTests(unittest.TestCase):
         self.text.assert_not_called()
         self.cards.assert_not_called()
 
+    def test_stale_nexon_listing_does_not_publish_an_older_article(self):
+        self.latest.source_url = monitor.NEXON_LIST_URL + "/830/latest"
+        self.same_day_old.source_url = monitor.NEXON_LIST_URL + "/829/earlier"
+        self.seed_state()
+        self.patches.remove(self.latest)
+        before = monitor.STATE_FILE.read_bytes()
+        self.assertEqual(monitor.main(), 1)
+        self.assertEqual(monitor.STATE_FILE.read_bytes(), before)
+        self.process.assert_not_called()
+        self.text.assert_not_called()
+        self.cards.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

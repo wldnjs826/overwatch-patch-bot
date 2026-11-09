@@ -2,10 +2,32 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import requests
+
 import monitor
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
+LATEST_NEXON_URL = f"{monitor.NEXON_LIST_URL}/862/patch-2026-11-05"
+LATEST_NEXON_HTML = """
+<div class="news-detail">
+    <div class="news-head"><div class="title">오버워치 패치 노트 – 2026년 11월 6일</div></div>
+    <div class="news-body">
+        <h4>핫픽스 업데이트</h4>
+        <p>핫픽스 업데이트입니다. 11월 4일 패치의 리플레이 코드는 계속 이용할 수 있습니다.</p>
+        <h4>영웅 업데이트</h4>
+        <h5>레킹볼</h5>
+        <div class="PatchNotesAbilityUpdate-name">갈고리 고정</div>
+        <ul><li>갈고리 고정을 취소하는 동안 레킹볼의&nbsp;기본 속도 제한이 15% 증가했습니다.</li></ul>
+    </div>
+</div>
+"""
+# A featured item appears earlier in the Nuxt table than the newer patch.
+NEWS_WITH_LATEST = """
+<script id="__NUXT_DATA__">[{"newsNo":1,"categoryId":2,"slug":3},859,2,"older",
+{"newsNo":5,"categoryId":2,"slug":6},862,"patch-2026-11-05",
+{"newsNo":8,"categoryId":9,"slug":10},863,3,"event"]</script>
+"""
 
 
 class NexonParsingTests(unittest.TestCase):
@@ -24,7 +46,7 @@ class NexonParsingTests(unittest.TestCase):
         html += (FIXTURES / "nexon-list.html").read_text(encoding="utf-8")
         links = monitor.extract_nexon_article_links(html)
         self.assertEqual(len(links), 2)
-        self.assertEqual(links[0], "https://overwatch.nexon.com/news/patchnotes/830")
+        self.assertEqual(links[0], "https://overwatch.nexon.com/news/patchnotes/830/patch-2026-09-16")
 
     def test_invalid_payload_keeps_legacy_link_fallback(self):
         for payload in ("{invalid", "{}", '[{"newsNo":999,"categoryId":-1}]'):
@@ -65,24 +87,60 @@ class NexonParsingTests(unittest.TestCase):
         result = monitor.parse_nexon_article(html, monitor.NEXON_LIST_URL + "/830")
         self.assertEqual(result["items"], [("li", "영웅 생명력이 증가했습니다.")])
 
-    def test_blizzard_fallback_keeps_ability_names_conditions_and_section_boundaries(self):
-        html = """<main><h3>오버워치 패치 노트 - 2026년 9월 18일</h3>
-        <h4>영웅 업데이트</h4><h4>돌격</h4><h5>D.Va</h5>
-        <div class="PatchNotesAbilityUpdate-name">부스터</div>
-        <ul><li>기술 조정<ul><li><p>재사용 대기시간 12초 → 10초 (5대5).</p></li></ul></li></ul>
-        <div class="PatchNotesGeneralUpdate-title">아이템 변경 사항</div>
-        <p>해당 아이템은 스타디움에서만 사용할 수 있습니다.</p>
-        <h3>오버워치 패치 노트 - 2026년 9월 17일</h3>
-        <p>이전 패치에서만 사용한 문장입니다.</p></main>"""
-        raws = monitor.parse_blizzard_page(html, monitor.BLIZZARD_BASE_URL)
-        self.assertEqual(len(raws), 2)
-        self.assertIn(("h6", "부스터"), raws[0]["items"])
-        self.assertIn(("section", "아이템 변경 사항"), raws[0]["items"])
-        original = "\n".join(monitor.format_summary(monitor.assign_patch_ids(raws)[0]))
-        self.assertEqual(original.count("재사용 대기시간 12초 → 10초 (5대5)."), 1)
-        self.assertIn("부스터", original)
-        self.assertIn("스타디움에서만", original)
-        self.assertNotIn("이전 패치에서만", original)
+    def test_merges_official_lists_and_keeps_newest_before_applying_limit(self):
+        stale_list = '<a href="/news/patchnotes/859/older">이전 공지</a>'
+        with patch.object(monitor, "NEXON_MAX_ARTICLES", 1):
+            self.assertEqual(
+                monitor.extract_nexon_article_links(stale_list, NEWS_WITH_LATEST),
+                [LATEST_NEXON_URL],
+            )
+
+    def test_latest_from_alternate_listing_uses_verified_numeric_route(self):
+        numeric_url = f"{monitor.NEXON_LIST_URL}/862"
+        responses = {
+            monitor.NEXON_LIST_URL: requests.Timeout("list timed out"),
+            monitor.NEXON_NEWS_URL: NEWS_WITH_LATEST,
+            LATEST_NEXON_URL: requests.HTTPError("slug unavailable"),
+            numeric_url: LATEST_NEXON_HTML,
+        }
+
+        def fetch(url):
+            result = responses[url]
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        with patch.object(monitor, "NEXON_MAX_ARTICLES", 1):
+            with patch.object(monitor, "fetch_html", side_effect=fetch) as requests_mock:
+                latest, = monitor.fetch_recent_patches()
+        self.assertCountEqual([call.args[0] for call in requests_mock.call_args_list], responses)
+        self.assertEqual(latest.source_url, numeric_url)
+        self.assertEqual(latest.date_key, "2026-11-06")
+        self.assertIn(("h6", "갈고리 고정"), latest.items)
+        self.assertIn(("li", "갈고리 고정을 취소하는 동안 레킹볼의 기본 속도 제한이 15% 증가했습니다."),
+                      latest.items)
+
+    def test_unreadable_latest_does_not_substitute_older_patch(self):
+        older_html = (FIXTURES / "nexon-article.html").read_text(encoding="utf-8")
+        responses = {
+            monitor.NEXON_LIST_URL: NEWS_WITH_LATEST,
+            monitor.NEXON_NEWS_URL: "",
+            LATEST_NEXON_URL: "<main>일시적으로 본문을 표시할 수 없습니다.</main>",
+            f"{monitor.NEXON_LIST_URL}/862": "",
+            f"{monitor.NEXON_LIST_URL}/859/older": older_html,
+        }
+        with patch.object(monitor, "fetch_html", side_effect=responses.__getitem__):
+            with self.assertRaisesRegex(RuntimeError, "최신 넥슨 패치 본문"):
+                monitor.fetch_recent_patches()
+
+    def test_no_blizzard_fallback_when_both_nexon_listings_fail(self):
+        with patch.object(monitor, "fetch_html", side_effect=requests.Timeout) as fetch:
+            with self.assertRaisesRegex(RuntimeError, "넥슨 목록"):
+                monitor.fetch_recent_patches()
+        self.assertCountEqual(
+            [call.args[0] for call in fetch.call_args_list],
+            [monitor.NEXON_LIST_URL, monitor.NEXON_NEWS_URL],
+        )
 
 
 if __name__ == "__main__":
