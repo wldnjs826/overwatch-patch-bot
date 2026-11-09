@@ -36,6 +36,5 @@ jobs:
       - name: 최신 한국어 패치 테스트 전송
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          MONTH_LOOKBACK: "4"
           NEXON_MAX_ARTICLES: "20"
         run: python test_latest.py

@@ -81,47 +81,19 @@ class OfficialSourceContractTests(unittest.TestCase):
         self.quiet.__enter__()
         self.addCleanup(self.quiet.__exit__, None, None, None)
 
-    def test_verified_same_patch_prefers_nexon_url_in_original_text(self):
+    def test_latest_selection_ignores_even_newer_blizzard_posts(self):
         nexon = official_patch(self.items)
-        blizzard = official_patch(self.items, source="blizzard")
-        selected = monitor.choose_patches([nexon], [blizzard])
-        self.assertEqual(len(selected), 1)
+        blizzard = official_patch(self.items, source="blizzard", date="2026-09-19")
+        selected = monitor.select_delivery_patches([nexon, blizzard])
+        self.assertEqual(selected, [nexon])
         body = "\n".join(monitor.format_summary(selected[0]))
         self.assertIn("출처: 넥슨 공식", body)
         self.assertIn(NEXON_URL, body)
         self.assertNotIn(BLIZZARD_URL, body)
 
-    def test_no_matching_nexon_post_retains_confirmed_blizzard_url(self):
+    def test_no_blizzard_delivery_when_nexon_is_missing(self):
         blizzard = official_patch(self.items, source="blizzard")
-        selected = monitor.choose_patches([], [blizzard])
-        self.assertEqual(len(selected), 1)
-        body = "\n".join(monitor.format_summary(selected[0]))
-        self.assertIn("출처: Blizzard 공식", body)
-        self.assertIn(BLIZZARD_URL, body)
-        self.assertNotIn(NEXON_URL, body)
-
-    def test_identical_words_on_another_date_do_not_borrow_nexon_link(self):
-        nexon = official_patch(self.items)
-        older_url = "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/09#patch-2026-09-17"
-        blizzard = official_patch(self.items, source="blizzard", date="2026-09-17", url=older_url)
-        selected = monitor.choose_patches([nexon], [blizzard])
-        self.assertEqual(len(selected), 2)
-        older = next(item for item in selected if item.date_key == "2026-09-17")
-        body = "\n".join(monitor.format_summary(older))
-        self.assertIn(older_url, body)
-        self.assertNotIn(NEXON_URL, body)
-
-    def test_same_date_but_different_values_or_conditions_are_not_duplicates(self):
-        for changed_line in ["생명력이 175에서 225로 증가했습니다. (5대5)",
-                             "생명력이 175에서 200으로 증가했습니다. (6대6)"]:
-            with self.subTest(line=changed_line):
-                nexon = official_patch(self.items)
-                blizzard = official_patch([*self.items[:-1], ("li", changed_line)], source="blizzard")
-                selected = monitor.choose_patches([nexon], [blizzard])
-                self.assertEqual(len(selected), 2)
-                self.assertEqual({item.source_url for item in selected}, {NEXON_URL, BLIZZARD_URL})
-                self.assertEqual(len({item.patch_id for item in selected}), 2,
-                                 "Different same-day patches must not overwrite each other's state")
+        self.assertEqual(monitor.select_delivery_patches([blizzard]), [])
 
 
 class OrderedDiscordContractTests(unittest.TestCase):
