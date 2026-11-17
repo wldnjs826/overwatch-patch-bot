@@ -2,7 +2,7 @@
   "title": "오버워치 2 패치 노트 - 2026년 8월 21일",
   "hash": "9128f551e9a94340b9829fcfd9477a466db5057866fec6953ee5e82fa3db7180",
   "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
-  "updated_at_utc": "2026-11-16T20:39:54.750653+00:00",
+  "updated_at_utc": "2026-11-17T03:11:15.516254+00:00",
   "parser": "monthly_all_patch_v1",
   "version": 8,
   "patches": {
@@ -1813,6 +1813,43 @@
             "1569426933496807598"
           ]
         }
+      ]
+    },
+    "2026-11-17#01": {
+      "patch_id": "2026-11-17#01",
+      "date_key": "2026-11-17",
+      "same_day_index": 1,
+      "title": "오버워치 패치 노트 – 2026년 11월 17일",
+      "body_hash": "fcfc93d0993ae53b81910a5312d266e9d302717b340f5214f0820b93c5875c6a",
+      "image_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "image_count": 0,
+      "signature_text": "핫픽스 업데이트 | 핫픽스 업데이트입니다 <n>월 <n>일 패치부터 생성된 리플레이 코드는 계속 이용할 수 있습니다 | 경쟁전 업데이트 | <n>대<n> 자유 경쟁전에서 챔피언 등급 플레이어가 포함된 그룹의 최대 실력 등급 격차가 <n>단계에서 <n>단계로 감소했습니다 이는 <n>대<n> 역할 고정 경쟁전에서 챔피언 등급 플레이어가 포함된 좁은 그룹에 허용되는 최대 격차와 동일합니다",
+      "source_identity": "66958cdb7d15cf6b57aa9454b155e889bb363bddac8634325405911ad51f4f0e",
+      "source_url": "https://overwatch.nexon.com/news/patchnotes/866/patch-2026-11-16",
+      "source_name": "nexon",
+      "first_seen_source": "nexon",
+      "status": "sent",
+      "discord_message_ids": [
+        "1572086679655682179"
+      ],
+      "summary_message_ids": [
+        "1572086687406755951"
+      ],
+      "summary_card_version": 8,
+      "first_seen_utc": "2026-11-17T03:11:12.232427+00:00",
+      "last_seen_utc": "2026-11-17T03:11:13.953479+00:00",
+      "text_format_version": 2,
+      "sent_at_utc": "2026-11-17T03:11:13.953497+00:00",
+      "last_edited_at_utc": "2026-11-17T03:11:13.953500+00:00",
+      "sent_source": "nexon",
+      "summary_body_hash": "fcfc93d0993ae53b81910a5312d266e9d302717b340f5214f0820b93c5875c6a",
+      "summary_empty": false,
+      "language_reason": "한국어 본문으로 판별",
+      "summary_source_lines": [
+        "## 핫픽스 업데이트",
+        "핫픽스 업데이트입니다. 11월 4일 패치부터 생성된 리플레이 코드는 계속 이용할 수 있습니다.",
+        "## 경쟁전 업데이트",
+        "- 6대6 자유 경쟁전에서 챔피언 등급 플레이어가 포함된 그룹의 최대 실력 등급 격차가 4단계에서 3단계로 감소했습니다. 이는 5대5 역할 고정 경쟁전에서 챔피언 등급 플레이어가 포함된 좁은 그룹에 허용되는 최대 격차와 동일합니다."
       ]
     }
   }
