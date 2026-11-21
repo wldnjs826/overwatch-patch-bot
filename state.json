@@ -2,7 +2,7 @@
   "title": "오버워치 2 패치 노트 - 2026년 8월 21일",
   "hash": "9128f551e9a94340b9829fcfd9477a466db5057866fec6953ee5e82fa3db7180",
   "source_url": "https://overwatch.blizzard.com/ko-kr/news/patch-notes/live/2026/08/",
-  "updated_at_utc": "2026-11-21T10:24:26.531120+00:00",
+  "updated_at_utc": "2026-11-21T17:42:57.856519+00:00",
   "parser": "monthly_all_patch_v1",
   "version": 8,
   "patches": {
@@ -1837,7 +1837,7 @@
       ],
       "summary_card_version": 8,
       "first_seen_utc": "2026-11-17T03:11:12.232427+00:00",
-      "last_seen_utc": "2026-11-21T10:24:26.525819+00:00",
+      "last_seen_utc": "2026-11-21T17:42:57.850326+00:00",
       "text_format_version": 2,
       "sent_at_utc": "2026-11-17T03:11:13.953497+00:00",
       "last_edited_at_utc": "2026-11-17T03:11:13.953500+00:00",
